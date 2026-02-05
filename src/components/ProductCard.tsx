@@ -96,8 +96,21 @@ export default function ProductCard({
 
   if (viewMode === "list") {
     const useMobileList = mobileListLayout && !canEdit;
+    const showDesktopListAdmin = canEdit && !useMobileList;
     return (
-      <div style={useMobileList ? styles.listCardMobile : styles.listCard} onClick={openProduct}>
+      <div
+        style={
+          useMobileList
+            ? styles.listCardMobile
+            : {
+                ...styles.listCard,
+                gridTemplateColumns: showDesktopListAdmin
+                  ? "75px minmax(0,1fr) auto auto"
+                  : "75px minmax(0,1fr) auto",
+              }
+        }
+        onClick={openProduct}
+      >
         <button
           type="button"
           style={styles.listImageWrap}
@@ -178,6 +191,48 @@ export default function ProductCard({
           ) : null}
         </div>
 
+        {showDesktopListAdmin ? (
+          <div style={styles.listAdminCol} onClick={(e) => e.stopPropagation()}>
+            <select
+              value={normalizedStatus}
+              onChange={(e) =>
+                onStatusChange?.(
+                  id,
+                  e.target.value as "Active" | "Disabled" | "Archived"
+                )
+              }
+              style={{
+                ...styles.statusSelect,
+                ...(normalizedStatus === "Active"
+                  ? styles.statusActive
+                  : normalizedStatus === "Disabled"
+                    ? styles.statusDisabled
+                    : styles.statusArchived),
+              }}
+              aria-label="Product status"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="Active">ACTIVE</option>
+              <option value="Disabled">DISABLED</option>
+              <option value="Archived">ARCHIVED</option>
+            </select>
+            {onEdit && (
+              <AppButton
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(id);
+                }}
+                style={styles.listEditBtn}
+                aria-label="Edit product"
+                title="Edit product"
+              >
+                <GearIcon size={16} />
+              </AppButton>
+            )}
+          </div>
+        ) : null}
+
         {!useMobileList ? (
           <div style={styles.listRight}>
             <div style={styles.listPrice}>₱ {formatMoney(price)}</div>
@@ -213,47 +268,6 @@ export default function ProductCard({
                 <span style={styles.pmGlyph}>+</span>
               </AppButton>
             </div>
-            {canEdit ? (
-              <div style={styles.listAdminRowBelow}>
-                <select
-                  value={normalizedStatus}
-                  onChange={(e) =>
-                    onStatusChange?.(
-                      id,
-                      e.target.value as "Active" | "Disabled" | "Archived"
-                    )
-                  }
-                  style={{
-                    ...styles.statusSelect,
-                    ...(normalizedStatus === "Active"
-                      ? styles.statusActive
-                      : normalizedStatus === "Disabled"
-                        ? styles.statusDisabled
-                        : styles.statusArchived),
-                  }}
-                  aria-label="Product status"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <option value="Active">ACTIVE</option>
-                  <option value="Disabled">DISABLED</option>
-                  <option value="Archived">ARCHIVED</option>
-                </select>
-                {onEdit && (
-                  <AppButton
-                    variant="ghost"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEdit(id);
-                    }}
-                    style={styles.listEditBtn}
-                    aria-label="Edit product"
-                    title="Edit product"
-                  >
-                    <GearIcon size={16} />
-                  </AppButton>
-                )}
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -614,7 +628,15 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     justifyItems: "end",
     gap: 8,
-    minWidth: 170,
+    minWidth: 140,
+  },
+  listAdminCol: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minWidth: 162,
+    alignSelf: "center",
   },
   listAdminRow: {
     display: "flex",
