@@ -1,1528 +1,2068 @@
+// src/app/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import * as React from "react";
 
-/**
- * Search helper used by the product grid.
- * IMPORTANT: This filters ONLY the product list on screen, never the cart.
- */
-function matchesQuery(product: any, rawQuery: string) {
-  const q = (rawQuery || "").trim().toLowerCase();
-  if (!q) return true;
+import Navbar from "@/components/Navbar";
+import ProductGrid from "@/components/ProductGrid";
+import ProductDrawer from "@/components/ProductDrawer";
+import ProductEditorDrawer from "@/components/ProductEditorDrawer";
+import CartDrawer from "@/components/CartDrawer";
+import CheckoutDrawer from "@/components/CheckoutDrawer";
+import AuthModal from "@/components/AuthModal";
+import MyDetailsDrawer from "@/components/MyDetailsDrawer";
+import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
+import OrderDrawer from "@/components/OrderDrawer";
+import ZoneStyleModal, { type ZoneStyleDraft } from "@/components/ZoneStyleModal";
+import LogoEditorModal from "@/components/LogoEditorModal";
 
-  const hay = [
-    product.name,
-    product.size,
-    product.note,
-    product.description,
-    String(product.price),
-    product.keywords || "",
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+import { formatMoney } from "@/lib/money";
+import { getSessionId } from "@/lib/session";
+import {
+  fetchProducts,
+  fetchProductImages,
+  matchesProductQuery,
+  type DbProduct,
+  type ProductImage,
+} from "@/lib/products";
+import { fetchCartView, setCartLineQty } from "@/lib/cartApi";
+import * as Cart from "@/lib/cart";
+import {
+  addOrderLinesByAdmin,
+  fetchOrderDetail,
+  fetchOrders,
+  updateOrderAmountPaid,
+  updateOrderPaymentProof,
+  updateOrderLinePackedQty,
+  updateOrderStatuses,
+  type OrderDetail,
+  type OrderStatusPatch,
+} from "@/lib/ordersApi";
+import { supabase } from "@/lib/supabase";
+import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 
-  return hay.includes(q);
+type Panel = null | "product" | "checkout" | "edit";
+type ZoneName = "header" | "navbar" | "main";
+
+type ZoneRow = {
+  zone: ZoneName;
+  bg_type: "color" | "image";
+  bg_color: string | null;
+  bg_image_url: string | null;
+};
+
+const DEFAULT_ZONE_STYLES: Record<ZoneName, ZoneStyleDraft> = {
+  header: { bg_type: "color", bg_color: "#000000", bg_image_url: "" },
+  navbar: { bg_type: "color", bg_color: "#ffffff", bg_image_url: "" },
+  main: { bg_type: "color", bg_color: "#000000", bg_image_url: "" },
+};
+const DEFAULT_ZONE_STYLES_BY_MODE: Record<"dark" | "light", Record<ZoneName, ZoneStyleDraft>> = {
+  dark: {
+    header: { ...DEFAULT_ZONE_STYLES.header },
+    navbar: { ...DEFAULT_ZONE_STYLES.navbar },
+    main: { ...DEFAULT_ZONE_STYLES.main },
+  },
+  light: {
+    header: { ...DEFAULT_ZONE_STYLES.header },
+    navbar: { ...DEFAULT_ZONE_STYLES.navbar },
+    main: { ...DEFAULT_ZONE_STYLES.main },
+  },
+};
+
+const UI_ASSETS_BUCKET = "ui-assets";
+
+type BrandingRow = {
+  logo_url: string | null;
+};
+
+function SettingsIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="9" cy="7" r="2.2" fill="currentColor" />
+      <circle cx="15" cy="12" r="2.2" fill="currentColor" />
+      <circle cx="11" cy="17" r="2.2" fill="currentColor" />
+    </svg>
+  );
 }
 
-function formatMoney(n: any) {
-  const num = Number(n || 0);
-  return num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+function isDarkColor(hexOrColor: string | null | undefined): boolean {
+  const raw = String(hexOrColor ?? "").trim();
+  if (!raw) return false;
+  const hex = raw.startsWith("#") ? raw.slice(1) : raw;
+  if (!/^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(hex)) return false;
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return luminance < 0.5;
 }
 
-function makeOrderId() {
-  const t = Date.now().toString(36).toUpperCase();
-  const r = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `MP-${t}-${r}`;
-}
+export default function Page() {
+  const blankCustomer = React.useCallback(
+    (): CustomerDraft => ({
+      full_name: "",
+      email: "",
+      phone: "",
+      attention_to: "",
+      line1: "",
+      line2: "",
+      barangay: "",
+      city: "",
+      province: "",
+      postal_code: "",
+      country: "Philippines",
+      notes: "",
+      delivery_date: "",
+      delivery_slot: "",
+      express_delivery: false,
+      add_refer_bag: false,
+    }),
+    []
+  );
+  const getEditModeKey = React.useCallback(
+    (uid: string | null) => `tp_edit_mode_${uid ?? "anon"}`,
+    []
+  );
+  // ----------------------------
+  // Session + layout refs
+  // ----------------------------
+  const sessionIdRef = React.useRef<string>("");
 
-export default function PremiumButchery() {
-  const products = [
-    {
-      id: 1,
-      name: "Brazilian Ribeye",
-      size: "1 kg (4 pcs)",
-      price: 1390,
-      note: "Rich marbling, bold flavor",
-      description:
-        "A classic steakhouse cut with generous marbling for deep beef flavor. Best pan-seared or grilled. Finish with butter and rest well.",
-      keywords: "ribeye steak beef marbling grill",
-    },
-    {
-      id: 2,
-      name: "Brazilian Tenderloin",
-      size: "1 kg (4–6 pcs)",
-      price: 1615,
-      note: "Ultra-tender, refined cut",
-      description:
-        "Lean, exceptionally tender, and clean in taste. Perfect for quick sear + butter baste. A premium cut for effortless success.",
-      keywords: "tenderloin filet steak lean",
-    },
-    {
-      id: 3,
-      name: "USDA Angus Ribeye",
-      size: "1 kg (2 pcs)",
-      price: 2200,
-      note: "Deep beef flavor, premium grade",
-      description:
-        "Thicker steaks with a rich, bold profile. Great for reverse-sear or grill. Salt early, sear hard, rest properly.",
-      keywords: "usda angus ribeye premium",
-    },
-    {
-      id: 4,
-      name: "USDA Angus Tenderloin",
-      size: "1 kg",
-      price: 2450,
-      note: "Luxury cut, butter-soft",
-      description:
-        "Exceptionally fine-grained and tender. Minimal seasoning needed. Ideal for special occasions.",
-      keywords: "usda angus tenderloin filet",
-    },
-    {
-      id: 5,
-      name: "Australian T-Bone",
-      size: "1 kg (3 pcs)",
-      price: 1180,
-      note: "Two cuts, one steak",
-      description:
-        "Tenderloin on one side, strip on the other. A butcher’s classic with bold character.",
-      keywords: "tbone steak australian",
-    },
-    {
-      id: 6,
-      name: "Australian Porterhouse",
-      size: "1 kg (3 pcs)",
-      price: 1200,
-      note: "Balanced & juicy",
-      description:
-        "A refined alternative to T-bone with a larger tenderloin section.",
-      keywords: "porterhouse steak",
-    },
-    {
-      id: 7,
-      name: "Wagyu Beef Cubes",
-      size: "500 g",
-      price: 1580,
-      note: "Intensely marbled",
-      description:
-        "Perfect for quick sear or yakiniku-style cooking. Rich, indulgent bites.",
-      keywords: "wagyu cubes japanese",
-    },
-    {
-      id: 8,
-      name: "Sous-vide Chicken Breast",
-      size: "200 g",
-      price: 233,
-      note: "Juicy, ready in minutes",
-      description:
-        "Gently cooked for consistent tenderness. Ideal for meal plans.",
-      keywords: "sous vide chicken meal prep protein",
-    },
-    {
-      id: 9,
-      name: "Sous-vide Pork Chop",
-      size: "250 g",
-      price: 295,
-      note: "Perfectly cooked",
-      description:
-        "Moist, tender pork chop cooked sous-vide for foolproof results.",
-      keywords: "pork chop sous vide",
-    },
-    {
-      id: 10,
-      name: "Beef Burger Patties",
-      size: "4 pcs (500 g)",
-      price: 520,
-      note: "Juicy & flavorful",
-      description:
-        "Made from premium beef, perfect for smash or classic burgers.",
-      keywords: "burger patties beef",
-    },
-    {
-      id: 11,
-      name: "Baby Potatoes Sous-vide",
-      size: "200 g",
-      price: 125,
-      note: "Butter-soft",
-      description:
-        "Pre-cooked for convenience. Crisp in pan or oven.",
-      keywords: "potatoes side sous vide",
-    },
-    {
-      id: 12,
-      name: "Garlic Butter",
-      size: "100 g",
-      price: 295,
-      note: "Steak essential",
-      description:
-        "Compound butter with roasted garlic. Melts beautifully on hot meat.",
-      keywords: "garlic butter sauce",
-    },
-    {
-      id: 13,
-      name: "Chimichurri Sauce",
-      size: "100 g",
-      price: 285,
-      note: "Fresh & herby",
-      description:
-        "Classic Argentine sauce for grilled meats.",
-      keywords: "chimichurri sauce",
-    },
-    {
-      id: 14,
-      name: "Roasted Vegetables",
-      size: "250 g",
-      price: 195,
-      note: "Colorful side",
-      description:
-        "Seasonal vegetables, lightly seasoned and ready to reheat.",
-      keywords: "vegetables side",
-    },
-    {
-      id: 15,
-      name: "Beef Bourguignon",
-      size: "400 g",
-      price: 480,
-      note: "Slow-cooked comfort",
-      description:
-        "Classic French beef stew, rich and deeply flavorful.",
-      keywords: "beef stew bourguignon",
-    },
-  ];
+  const headerRef = React.useRef<HTMLDivElement | null>(null);
+  const navRef = React.useRef<HTMLDivElement | null>(null);
+  const listScrollRef = React.useRef<HTMLDivElement | null>(null);
 
-  const [cart, setCart] = useState<Record<number, number>>({});
-  const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  // panel: null | 'product' | 'cart' | 'checkout'
-  const [panel, setPanel] = useState<null | "product" | "cart" | "checkout">(
+  const [topOffset, setTopOffset] = React.useState<number>(0);
+  const [isMobileViewport, setIsMobileViewport] = React.useState<boolean>(false);
+
+  // remember list scroll position for "back to where I was"
+  const listScrollTopRef = React.useRef<number>(0);
+
+  // ----------------------------
+  // Products
+  // ----------------------------
+  const [products, setProducts] = React.useState<DbProduct[]>([]);
+  const [productImagesById, setProductImagesById] = React.useState<
+    Record<string, ProductImage[]>
+  >({});
+  const [loadingProducts, setLoadingProducts] = React.useState<boolean>(true);
+  const [selectedTypes, setSelectedTypes] = React.useState<string[]>([]);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState<boolean>(false);
+
+  const [search, setSearch] = React.useState<string>("");
+  const [gridView, setGridView] = React.useState<"list" | "4" | "6">("4");
+  const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
+  const [authOpen, setAuthOpen] = React.useState<boolean>(false);
+  const [authLabel, setAuthLabel] = React.useState<string | null>(null);
+  const [authUserId, setAuthUserId] = React.useState<string | null>(null);
+  const [authEmail, setAuthEmail] = React.useState<string>("");
+  const [authPhone, setAuthPhone] = React.useState<string>("");
+  const [detailsOpen, setDetailsOpen] = React.useState<boolean>(false);
+  const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
+  const [allOrdersOpen, setAllOrdersOpen] = React.useState<boolean>(false);
+  const [editMode, setEditMode] = React.useState<boolean>(false);
+  const [myOrders, setMyOrders] = React.useState<MyOrderItem[]>([]);
+  const [allOrders, setAllOrders] = React.useState<MyOrderItem[]>([]);
+  const [selectedMyOrderId, setSelectedMyOrderId] = React.useState<string | null>(null);
+  const [selectedAllOrderId, setSelectedAllOrderId] = React.useState<string | null>(null);
+  const [orderDrawerSource, setOrderDrawerSource] = React.useState<"my" | "all" | null>(null);
+  const [selectedOrderDetail, setSelectedOrderDetail] = React.useState<OrderDetail | null>(
     null
   );
-
-  // "Database" for MVP preview: localStorage
-  const [orders, setOrders] = useState<any[]>([]);
-
-  // Draft order created on checkout
-  const [draft, setDraft] = useState<any | null>(null);
-  const [customer, setCustomer] = useState({
-    name: "",
-    phone: "",
-    address: "",
-    notes: "",
+  const [loadingOrderDetail, setLoadingOrderDetail] = React.useState<boolean>(false);
+  const [adminAllProductsMode, setAdminAllProductsMode] = React.useState<boolean>(false);
+  const [zoneStylesByMode, setZoneStylesByMode] = React.useState<
+    Record<"dark" | "light", Record<ZoneName, ZoneStyleDraft>>
+  >(DEFAULT_ZONE_STYLES_BY_MODE);
+  const [zoneEditorOpen, setZoneEditorOpen] = React.useState<boolean>(false);
+  const [zoneEditorTarget, setZoneEditorTarget] = React.useState<ZoneName>("header");
+  const [zoneEditorSaving, setZoneEditorSaving] = React.useState<boolean>(false);
+  const [zoneEditorError, setZoneEditorError] = React.useState<string>("");
+  const [themeMode, setThemeMode] = React.useState<"dark" | "light">("dark");
+  const [logoUrlsByMode, setLogoUrlsByMode] = React.useState<Record<"dark" | "light", string>>({
+    dark: "",
+    light: "",
   });
-  const [paymentFile, setPaymentFile] = useState<File | null>(null);
-  const [paymentPreviewUrl, setPaymentPreviewUrl] = useState<string | null>(null);
-  const [checkoutState, setCheckoutState] = useState<"form" | "success">("form");
+  const [logoEditorOpen, setLogoEditorOpen] = React.useState<boolean>(false);
+  const [logoEditorSaving, setLogoEditorSaving] = React.useState<boolean>(false);
+  const [logoEditorError, setLogoEditorError] = React.useState<string>("");
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // ----------------------------
+  // Panels
+  // ----------------------------
+  const [panel, setPanel] = React.useState<Panel>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [editorReturnToProduct, setEditorReturnToProduct] = React.useState<boolean>(false);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("MP_ORDERS");
-      if (raw) setOrders(JSON.parse(raw));
-    } catch {
-      // ignore
-    }
+  // ----------------------------
+  // Cart
+  // ----------------------------
+  const [cartOpen, setCartOpen] = React.useState<boolean>(false);
+  const [cart, setCart] = React.useState<Cart.CartState>({});
+  const [cartItems, setCartItems] = React.useState<Cart.CartItem[]>([]);
+  const [{ totalUnits, subtotal }, setTotals] = React.useState({
+    totalUnits: 0,
+    subtotal: 0,
+  });
+
+  // ----------------------------
+  // Customer
+  // ----------------------------
+  const [customer, setCustomer] = React.useState<CustomerDraft>(blankCustomer);
+  const [createAccountFromDetails, setCreateAccountFromDetails] =
+    React.useState<boolean>(false);
+  const [saveAddressToProfile, setSaveAddressToProfile] = React.useState<boolean>(false);
+  const [profileHasAddress, setProfileHasAddress] = React.useState<boolean>(false);
+  const [profileAddress, setProfileAddress] = React.useState({
+    attention_to: "",
+    line1: "",
+    line2: "",
+    barangay: "",
+    city: "",
+    province: "",
+    postal_code: "",
+    country: "Philippines",
+  });
+  const [paymentFile, setPaymentFile] = React.useState<File | null>(null);
+  const resolvedGridView: "list" | "4" | "6" = gridView;
+  const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
+    setCustomer(next);
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem("MP_ORDERS", JSON.stringify(orders));
-    } catch {
-      // ignore
-    }
-  }, [orders]);
-
-  useEffect(() => {
-    // cleanup blob urls
-    return () => {
-      if (paymentPreviewUrl) URL.revokeObjectURL(paymentPreviewUrl);
+  // ----------------------------
+  // Layout measure
+  // ----------------------------
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      const h = headerRef.current?.offsetHeight ?? 0;
+      const n = navRef.current?.offsetHeight ?? 64;
+      setTopOffset(h + n);
+      setIsMobileViewport(window.innerWidth < 768);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    measure();
+    window.addEventListener("resize", measure);
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro) {
+      if (headerRef.current) ro.observe(headerRef.current);
+      if (navRef.current) ro.observe(navRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro?.disconnect();
+    };
   }, []);
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => matchesQuery(p, search));
-  }, [products, search]);
+  React.useEffect(() => {
+    if (!isMobileViewport) setMobileFiltersOpen(false);
+  }, [isMobileViewport]);
 
-  const selected = useMemo(() => {
-    return products.find((p) => p.id === selectedId) || null;
+  React.useEffect(() => {
+    const raw = window.localStorage.getItem("tp_theme_mode");
+    if (raw === "dark" || raw === "light") setThemeMode(raw);
+  }, []);
+
+  React.useEffect(() => {
+    window.localStorage.setItem("tp_theme_mode", themeMode);
+  }, [themeMode]);
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-tp-mode", themeMode);
+  }, [themeMode]);
+
+  // ----------------------------
+  // Session init
+  // ----------------------------
+  React.useEffect(() => {
+    sessionIdRef.current = getSessionId();
+  }, []);
+
+  React.useEffect(() => {
+    if (!authUserId) {
+      setEditMode(false);
+      return;
+    }
+    const raw = window.localStorage.getItem(getEditModeKey(authUserId));
+    setEditMode(raw === "1");
+  }, [authUserId, getEditModeKey]);
+
+  const toggleEditMode = React.useCallback(
+    (next: boolean) => {
+      setEditMode(next);
+      if (!authUserId) return;
+      window.localStorage.setItem(getEditModeKey(authUserId), next ? "1" : "0");
+    },
+    [authUserId, getEditModeKey]
+  );
+  React.useEffect(() => {
+  const sid = getSessionId();
+  sessionIdRef.current = sid;
+  (globalThis as { __TP_SESSION_ID?: string }).__TP_SESSION_ID = sid; // <-- needed for RLS policies on carts
+}, []);
+
+  // ----------------------------
+  // Load products
+  // ----------------------------
+  const loadCatalog = React.useCallback(async () => {
+    setLoadingProducts(true);
+    try {
+      const p = await fetchProducts({
+        includeInactive: isAdmin && (editMode || adminAllProductsMode),
+      });
+      const safeProducts = Array.isArray(p) ? p : [];
+      const ids = safeProducts.map((item) => String(item.id));
+      const allImages = await fetchProductImages(ids);
+
+      const imagesById: Record<string, ProductImage[]> = {};
+      for (const img of allImages) {
+        const pid = String(img.product_id);
+        if (!imagesById[pid]) imagesById[pid] = [];
+        imagesById[pid].push(img);
+      }
+
+      const withThumbnailFallback = safeProducts.map((prod) => {
+        const pid = String(prod.id);
+        const images = (imagesById[pid] ?? [])
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order);
+        const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
+        const firstImage = images[0]?.url ?? null;
+        const ownThumb = prod.thumbnail_url?.trim() || null;
+        return {
+          ...prod,
+          thumbnail_url: ownThumb ?? orderOne ?? firstImage,
+        };
+      });
+
+      setProductImagesById(imagesById);
+      setProducts(withThumbnailFallback);
+    } catch (e: unknown) {
+      console.error("[page] fetchProducts failed:", e);
+      const message = e instanceof Error ? e.message : String(e);
+      alert(`Products failed to load: ${message}`);
+      setProductImagesById({});
+      setProducts([]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [adminAllProductsMode, editMode, isAdmin]);
+
+  React.useEffect(() => {
+    loadCatalog();
+  }, [loadCatalog]);
+
+  React.useEffect(() => {
+    const loadZoneStyles = async () => {
+      const { data, error } = await supabase
+        .from("ui_zone_styles")
+        .select("zone,bg_type,bg_color,bg_image_url");
+      const rows = error ? [] : ((data ?? []) as ZoneRow[]);
+      setZoneStylesByMode((prev) => {
+        const next = {
+          dark: { ...prev.dark },
+          light: { ...prev.light },
+        };
+        for (const row of rows) {
+          if (row.zone !== "header" && row.zone !== "navbar" && row.zone !== "main") continue;
+          const styleDraft: ZoneStyleDraft = {
+            bg_type: row.bg_type === "image" ? "image" : "color",
+            bg_color:
+              row.bg_color ??
+              (row.zone === "navbar" ? "#ffffff" : "#000000"),
+            bg_image_url: row.bg_image_url ?? "",
+          };
+          next.dark[row.zone] = styleDraft;
+          next.light[row.zone] = styleDraft;
+        }
+        try {
+          const raw = window.localStorage.getItem("tp_zone_styles_by_mode");
+          if (raw) {
+            const parsed = JSON.parse(raw) as Partial<
+              Record<"dark" | "light", Partial<Record<ZoneName, ZoneStyleDraft>>>
+            >;
+            if (parsed.dark) {
+              next.dark = { ...next.dark, ...parsed.dark } as Record<ZoneName, ZoneStyleDraft>;
+            }
+            if (parsed.light) {
+              next.light = { ...next.light, ...parsed.light } as Record<ZoneName, ZoneStyleDraft>;
+            }
+          }
+        } catch {
+          // ignore invalid local cache
+        }
+        return next;
+      });
+    };
+    loadZoneStyles();
+  }, []);
+
+  React.useEffect(() => {
+    const loadLogo = async () => {
+      const { data } = await supabase
+        .from("ui_branding")
+        .select("logo_url")
+        .limit(1)
+        .maybeSingle();
+      const row = (data ?? null) as BrandingRow | null;
+      const fallback = row?.logo_url ?? "";
+      const next: Record<"dark" | "light", string> = {
+        dark: fallback,
+        light: fallback,
+      };
+      try {
+        const raw = window.localStorage.getItem("tp_logo_urls_by_mode");
+        if (raw) {
+          const parsed = JSON.parse(raw) as Partial<Record<"dark" | "light", string>>;
+          if (typeof parsed.dark === "string") next.dark = parsed.dark;
+          if (typeof parsed.light === "string") next.light = parsed.light;
+        }
+      } catch {
+        // ignore local cache parse issues
+      }
+      setLogoUrlsByMode(next);
+    };
+    loadLogo();
+  }, []);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const loadRole = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
+      if (!user || !mounted) {
+        setIsAdmin(false);
+        setEditMode(false);
+        setAdminAllProductsMode(false);
+        setAuthLabel(null);
+        setAuthUserId(null);
+        setAuthEmail("");
+        setAuthPhone("");
+        return;
+      }
+
+      const rawLabel =
+        (user.user_metadata?.full_name as string | undefined) ||
+        (user.user_metadata?.name as string | undefined) ||
+        user.email ||
+        user.phone;
+      setAuthLabel(rawLabel ? String(rawLabel).trim() : null);
+      setAuthUserId(user.id);
+      setAuthEmail(user.email ?? "");
+      setAuthPhone(user.phone ?? "");
+
+      let role: string | null = null;
+
+      const byId = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!byId.error && byId.data?.role) role = String(byId.data.role);
+
+      if (!role) {
+        const byUserId = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!byUserId.error && byUserId.data?.role) role = String(byUserId.data.role);
+      }
+
+      if (mounted) setIsAdmin(role === "admin");
+    };
+
+    loadRole();
+    const { data: subscription } = supabase.auth.onAuthStateChange(() => {
+      loadRole();
+    });
+    return () => {
+      mounted = false;
+      subscription.subscription.unsubscribe();
+    };
+  }, []);
+
+  const logout = React.useCallback(async () => {
+    await supabase.auth.signOut();
+    setAuthLabel(null);
+    setAuthUserId(null);
+    setAuthEmail("");
+    setAuthPhone("");
+    setIsAdmin(false);
+    setEditMode(false);
+    setAdminAllProductsMode(false);
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setMyOrders([]);
+    setAllOrders([]);
+    setSelectedMyOrderId(null);
+    setSelectedAllOrderId(null);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
+    setProfileHasAddress(false);
+    setSaveAddressToProfile(false);
+    setCreateAccountFromDetails(false);
+    setProfileAddress({
+      attention_to: "",
+      line1: "",
+      line2: "",
+      barangay: "",
+      city: "",
+      province: "",
+      postal_code: "",
+      country: "Philippines",
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!authUserId) return;
+    const fillCustomer = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select(
+          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,delivery_note,country"
+        )
+        .eq("id", authUserId)
+        .maybeSingle();
+
+      const firstName = String(data?.first_name ?? "").trim();
+      const lastName = String(data?.last_name ?? "").trim();
+      const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+      const profilePhone = String(data?.phone ?? "").trim();
+      const deliveryNote = String(data?.delivery_note ?? "").trim();
+      const hasAddress =
+        String(data?.address_line1 ?? "").trim().length > 0 &&
+        String(data?.barangay ?? "").trim().length > 0 &&
+        String(data?.city ?? "").trim().length > 0 &&
+        String(data?.province ?? "").trim().length > 0 &&
+        String(data?.postal_code ?? "").trim().length > 0;
+      setProfileAddress({
+        attention_to: String(data?.attention_to ?? "").trim(),
+        line1: String(data?.address_line1 ?? "").trim(),
+        line2: String(data?.address_line2 ?? "").trim(),
+        barangay: String(data?.barangay ?? "").trim(),
+        city: String(data?.city ?? "").trim(),
+        province: String(data?.province ?? "").trim(),
+        postal_code: String(data?.postal_code ?? "").trim(),
+        country: String(data?.country ?? "").trim() || "Philippines",
+      });
+      setProfileHasAddress(hasAddress);
+      setSaveAddressToProfile(!hasAddress);
+
+      setCustomer((prev: CustomerDraft) => ({
+        ...prev,
+        full_name: prev.full_name || fullName,
+        email: prev.email || authEmail || "",
+        phone: prev.phone || profilePhone || authPhone || "",
+        attention_to: prev.attention_to || String(data?.attention_to ?? "").trim(),
+        line1: prev.line1 || String(data?.address_line1 ?? "").trim(),
+        line2: prev.line2 || String(data?.address_line2 ?? "").trim(),
+        barangay: prev.barangay || String(data?.barangay ?? "").trim(),
+        city: prev.city || String(data?.city ?? "").trim(),
+        province: prev.province || String(data?.province ?? "").trim(),
+        postal_code: prev.postal_code || String(data?.postal_code ?? "").trim(),
+        country: prev.country || String(data?.country ?? "").trim() || "Philippines",
+        notes: prev.notes || deliveryNote,
+      }));
+    };
+    void fillCustomer();
+  }, [authUserId, authEmail, authPhone]);
+
+  const openZoneEditor = React.useCallback((zone: ZoneName) => {
+    setZoneEditorError("");
+    setZoneEditorTarget(zone);
+    setZoneEditorOpen(true);
+  }, []);
+
+  const saveZoneStyle = React.useCallback(
+    async (next: ZoneStyleDraft) => {
+      setZoneEditorSaving(true);
+      setZoneEditorError("");
+      try {
+        const payload = {
+          zone: zoneEditorTarget,
+          bg_type: next.bg_type,
+          bg_color: next.bg_color || null,
+          bg_image_url: next.bg_image_url || null,
+        };
+        const { error } = await supabase
+          .from("ui_zone_styles")
+          .upsert(payload, { onConflict: "zone" });
+        if (error) throw error;
+        setZoneStylesByMode((prev) => {
+          const updated = {
+            ...prev,
+            [themeMode]: {
+              ...prev[themeMode],
+              [zoneEditorTarget]: next,
+            },
+          };
+          window.localStorage.setItem("tp_zone_styles_by_mode", JSON.stringify(updated));
+          return updated;
+        });
+        setZoneEditorOpen(false);
+      } catch (e: unknown) {
+        setZoneEditorError(e instanceof Error ? e.message : "Failed to save style.");
+      } finally {
+        setZoneEditorSaving(false);
+      }
+    },
+    [themeMode, zoneEditorTarget]
+  );
+
+  const uploadUiAsset = React.useCallback(
+    async (file: File, kind: "zone" | "logo"): Promise<string> => {
+      const extension = file.name.includes(".")
+        ? file.name.split(".").pop()?.toLowerCase() ?? "jpg"
+        : "jpg";
+      const safeExt = extension.replace(/[^a-z0-9]/g, "") || "jpg";
+      const stamp = Date.now();
+      const rand = Math.random().toString(36).slice(2, 9);
+      const path = `${kind}/${stamp}-${rand}.${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(UI_ASSETS_BUCKET)
+        .upload(path, file, { upsert: false });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from(UI_ASSETS_BUCKET).getPublicUrl(path);
+      return data.publicUrl;
+    },
+    []
+  );
+
+  const saveLogo = React.useCallback(async (nextUrl: string) => {
+    setLogoEditorSaving(true);
+    setLogoEditorError("");
+    try {
+      const { error } = await supabase
+        .from("ui_branding")
+        .upsert({ id: 1, logo_url: nextUrl || null }, { onConflict: "id" });
+      if (error) throw error;
+      setLogoUrlsByMode((prev) => {
+        const updated = { ...prev, [themeMode]: nextUrl };
+        window.localStorage.setItem("tp_logo_urls_by_mode", JSON.stringify(updated));
+        return updated;
+      });
+      setLogoEditorOpen(false);
+    } catch (e: unknown) {
+      setLogoEditorError(e instanceof Error ? e.message : "Failed to save logo.");
+    } finally {
+      setLogoEditorSaving(false);
+    }
+  }, [themeMode]);
+
+  const headerZoneStyle = React.useMemo<React.CSSProperties>(() => {
+    const cfg = zoneStylesByMode[themeMode].header;
+    if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
+      return {
+        backgroundColor: cfg.bg_color || "#000000",
+        backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      };
+    }
+    return { background: cfg.bg_color || "#000000" };
+  }, [themeMode, zoneStylesByMode]);
+
+  const navbarZoneStyle = React.useMemo<React.CSSProperties>(() => {
+    const cfg = zoneStylesByMode[themeMode].navbar;
+    if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
+      return {
+        backgroundColor: cfg.bg_color || "#ffffff",
+        backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      };
+    }
+    return { background: cfg.bg_color || "#ffffff" };
+  }, [themeMode, zoneStylesByMode]);
+
+  const navbarDisplayStyle = React.useMemo<React.CSSProperties>(
+    () => ({
+      ...navbarZoneStyle,
+    }),
+    [navbarZoneStyle]
+  );
+  const navbarTone: "dark-bg" | "light-bg" = React.useMemo(() => {
+    const cfg = zoneStylesByMode[themeMode].navbar;
+    const bg = cfg.bg_color || "#ffffff";
+    return isDarkColor(bg) ? "dark-bg" : "light-bg";
+  }, [themeMode, zoneStylesByMode]);
+
+  const mainZoneStyle = React.useMemo<React.CSSProperties>(() => {
+    const cfg = zoneStylesByMode[themeMode].main;
+    if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
+      return {
+        backgroundColor: cfg.bg_color || "#000000",
+        backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      };
+    }
+    return { background: cfg.bg_color || "#000000" };
+  }, [themeMode, zoneStylesByMode]);
+
+  // ----------------------------
+  // Cart refresh (IMPORTANT: declared BEFORE changeQty)
+  // fetchCartView returns CartItem[] already
+  // ----------------------------
+const refreshCart = React.useCallback(async () => {
+  const sessionId = sessionIdRef.current;
+  if (!sessionId || sessionId === "server") return;
+
+  const rows = await fetchCartView(sessionId); // rows from cart_view (array)
+
+  const items = Cart.buildCartItems(Array.isArray(rows) ? rows : []);
+  setCartItems(items);
+
+  // Build cart map { [productId]: qty }
+  const nextCart: Cart.CartState = {};
+  for (const it of items) nextCart[it.productId] = it.qty;
+  setCart(nextCart);
+
+  setTotals(Cart.cartTotals(items));
+}, []);
+
+React.useEffect(() => {
+  if (!sessionIdRef.current || sessionIdRef.current === "server") return;
+  refreshCart();
+}, [refreshCart]);
+
+  // ----------------------------
+  // Cart actions (optimistic + sync)
+  // ----------------------------
+  const changeQty = React.useCallback(
+    async (productId: string, nextQty: number) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId || sessionId === "server") return;
+
+      // optimistic local update
+      setCart((prev: Cart.CartState) => {
+        const v = Math.max(nextQty, 0);
+        const copy = { ...prev };
+        if (v <= 0) delete copy[productId];
+        else copy[productId] = v;
+        return copy;
+      });
+
+      try {
+        await setCartLineQty(sessionId, productId, nextQty);
+        await refreshCart();
+      } catch (e: unknown) {
+        console.error("changeQty failed:", e);
+        await refreshCart(); // rollback to server truth
+        const message = e instanceof Error ? e.message : "Cart update failed (RLS / permissions).";
+        alert(message);
+      }
+    },
+    [refreshCart]
+  );
+
+  const addToCart = React.useCallback(
+    async (id: string) => {
+      const cur = cart[id] ?? 0;
+      await changeQty(id, cur + 1);
+    },
+    [cart, changeQty]
+  );
+
+  const removeFromCart = React.useCallback(
+    async (id: string) => {
+      const cur = cart[id] ?? 0;
+      await changeQty(id, Math.max(cur - 1, 0));
+    },
+    [cart, changeQty]
+  );
+
+  // ----------------------------
+  // Filtered products + selection
+  // ----------------------------
+  const normalizeType = React.useCallback(
+    (value: unknown) => String(value ?? "").trim().toLowerCase(),
+    []
+  );
+
+  const productTypes = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of products) {
+      const raw = String(p.type ?? "").trim();
+      const key = normalizeType(raw) || "other";
+      if (!map.has(key)) map.set(key, raw || "Other");
+    }
+    return [...map.entries()]
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [normalizeType, products]);
+
+  React.useEffect(() => {
+    const valid = new Set(productTypes.map((t) => t.key));
+    setSelectedTypes((prev) => prev.filter((t) => valid.has(t)));
+  }, [productTypes]);
+
+  const filteredProducts = React.useMemo(() => {
+    const q = search.trim();
+    const hasTypeFilter = selectedTypes.length > 0;
+    return products.filter((p) => {
+      const typeKey = normalizeType(p.type) || "other";
+      const typeOk = !hasTypeFilter || selectedTypes.includes(typeKey);
+      return typeOk && matchesProductQuery(p, q);
+    });
+  }, [normalizeType, products, search, selectedTypes]);
+
+  const selectedProduct = React.useMemo(() => {
+    if (!selectedId) return null;
+    return products.find((p) => String(p.id) === selectedId) ?? null;
   }, [products, selectedId]);
 
-  const add = (id: number) => {
-    setCart((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
-  };
-
-  const remove = (id: number) => {
-    setCart((prev) => {
-      const next = { ...prev };
-      if (!next[id]) return next;
-      next[id] -= 1;
-      if (next[id] <= 0) delete next[id];
-      return next;
+  const cartItemsForDisplay = React.useMemo(() => {
+    return cartItems.map((item) => {
+      const product = products.find((p) => String(p.id) === item.productId);
+      if (item.temperature && item.thumbnailUrl) return item;
+      return {
+        ...item,
+        temperature: product?.temperature ?? null,
+        thumbnailUrl: item.thumbnailUrl ?? product?.thumbnail_url ?? null,
+      };
     });
-  };
+  }, [cartItems, products]);
 
-  const openProduct = (id: number) => {
+  // ----------------------------
+  // UI navigation
+  // ----------------------------
+  const scrollToProducts = React.useCallback(() => {
+    setAdminAllProductsMode(false);
+    setPanel(null);
+    const el = listScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  const openAllProductsView = React.useCallback(() => {
+    if (!isAdmin) return;
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
+    setCartOpen(false);
+    setPanel(null);
+    setAdminAllProductsMode(true);
+    const el = listScrollRef.current;
+    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+  }, [isAdmin]);
+
+  const openProduct = React.useCallback((id: string) => {
+    listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
     setSelectedId(id);
     setPanel("product");
-  };
+  }, []);
 
-  const openCart = () => setPanel("cart");
-  const closePanel = () => setPanel(null);
+  const openEditProduct = React.useCallback(
+    (id: string) => {
+      if (!isAdmin) return;
+      listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
+      setEditorReturnToProduct(panel === "product");
+      setSelectedId(id);
+      setPanel("edit");
+    },
+    [isAdmin, panel]
+  );
 
-  const items = Object.entries(cart)
-    .map(([id, qty]) => {
-      const p = products.find((x) => x.id === Number(id));
-      return p ? { ...p, qty } : null;
-    })
-    .filter(Boolean) as any[];
+  const createProduct = React.useCallback(async () => {
+    if (!isAdmin) return;
+    const { data, error } = await supabase
+      .from("products")
+      .insert({
+        name: "New Product",
+        long_name: "New Product",
+        status: "Disabled",
+      })
+      .select("id")
+      .single();
+    if (error || !data?.id) {
+      alert(error?.message ?? "Failed to create product.");
+      return;
+    }
+    await loadCatalog();
+    listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
+    setEditorReturnToProduct(false);
+    setSelectedId(String(data.id));
+    setPanel("edit");
+  }, [isAdmin, loadCatalog]);
 
-  const totalUnits = items.reduce((sum, i) => sum + i.qty, 0);
-  const total = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const closeEditor = React.useCallback(() => {
+    if (editorReturnToProduct && selectedId) {
+      setPanel("product");
+      return;
+    }
+    setPanel(null);
+    const el = listScrollRef.current;
+    if (el) el.scrollTop = listScrollTopRef.current;
+  }, [editorReturnToProduct, selectedId]);
 
-  // Checkout logic
-  const resetCheckoutArtifacts = () => {
-    setCustomer({ name: "", phone: "", address: "", notes: "" });
-    setDraft(null);
-    setCheckoutState("form");
+  const updateProductStatus = React.useCallback(
+    async (id: string, nextStatus: "Active" | "Disabled" | "Archived") => {
+      const { error } = await supabase
+        .from("products")
+        .update({ status: nextStatus })
+        .eq("id", id);
+      if (error) {
+        if (error.message.toLowerCase().includes("row-level security")) {
+          alert(
+            "Status update blocked by RLS policy on products. We need to adjust update policy to allow admins."
+          );
+        } else {
+          alert(error.message);
+        }
+        return;
+      }
+      setProducts((prev) =>
+        prev
+          .map((p) => (String(p.id) === id ? { ...p, status: nextStatus } : p))
+          .filter((p) =>
+            isAdmin && (editMode || adminAllProductsMode)
+              ? true
+              : String(p.status).toLowerCase() === "active"
+          )
+      );
+    },
+    [adminAllProductsMode, editMode, isAdmin]
+  );
 
-    if (paymentPreviewUrl) {
-      URL.revokeObjectURL(paymentPreviewUrl);
-      setPaymentPreviewUrl(null);
+  const backToList = React.useCallback(() => {
+    setPanel(null);
+    const el = listScrollRef.current;
+    if (el) el.scrollTop = listScrollTopRef.current;
+  }, []);
+
+  const openCheckout = React.useCallback(() => {
+    const loadProfileForCheckout = async () => {
+      if (!authUserId) {
+        setProfileHasAddress(false);
+        setSaveAddressToProfile(false);
+        return;
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select(
+          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,country,delivery_note"
+        )
+        .eq("id", authUserId)
+        .maybeSingle();
+
+      const firstName = String(data?.first_name ?? "").trim();
+      const lastName = String(data?.last_name ?? "").trim();
+      const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+      const hasAddress =
+        String(data?.address_line1 ?? "").trim().length > 0 &&
+        String(data?.barangay ?? "").trim().length > 0 &&
+        String(data?.city ?? "").trim().length > 0 &&
+        String(data?.province ?? "").trim().length > 0 &&
+        String(data?.postal_code ?? "").trim().length > 0;
+      setProfileAddress({
+        attention_to: String(data?.attention_to ?? "").trim(),
+        line1: String(data?.address_line1 ?? "").trim(),
+        line2: String(data?.address_line2 ?? "").trim(),
+        barangay: String(data?.barangay ?? "").trim(),
+        city: String(data?.city ?? "").trim(),
+        province: String(data?.province ?? "").trim(),
+        postal_code: String(data?.postal_code ?? "").trim(),
+        country: String(data?.country ?? "").trim() || "Philippines",
+      });
+
+      setProfileHasAddress(hasAddress);
+      setSaveAddressToProfile(!hasAddress);
+
+      setCustomer((prev: CustomerDraft) => ({
+        ...prev,
+        full_name: prev.full_name || fullName,
+        email: prev.email || authEmail || "",
+        phone: prev.phone || String(data?.phone ?? "").trim() || authPhone || "",
+        attention_to: prev.attention_to || String(data?.attention_to ?? "").trim(),
+        line1: prev.line1 || String(data?.address_line1 ?? "").trim(),
+        line2: prev.line2 || String(data?.address_line2 ?? "").trim(),
+        barangay: prev.barangay || String(data?.barangay ?? "").trim(),
+        city: prev.city || String(data?.city ?? "").trim(),
+        province: prev.province || String(data?.province ?? "").trim(),
+        postal_code: prev.postal_code || String(data?.postal_code ?? "").trim(),
+        country: prev.country || String(data?.country ?? "").trim() || "Philippines",
+        notes: prev.notes || String(data?.delivery_note ?? "").trim(),
+      }));
+    };
+
+    setCartOpen(false);
+    void loadProfileForCheckout();
+    setPanel("checkout");
+  }, [authEmail, authPhone, authUserId]);
+
+  const openProfileDrawer = React.useCallback(() => {
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setCartOpen(false);
+    setPanel(null);
+    setDetailsOpen(true);
+  }, []);
+
+  const loadAndSelectOrder = React.useCallback(async (orderId: string) => {
+    setLoadingOrderDetail(true);
+    setSelectedOrderDetail(null);
+    try {
+      const detail = await fetchOrderDetail(orderId);
+      setSelectedOrderDetail(detail);
+    } catch (e) {
+      console.error("Failed to load order detail", e);
+      setSelectedOrderDetail(null);
+    } finally {
+      setLoadingOrderDetail(false);
+    }
+  }, []);
+
+  const handleOrderStatusChange = React.useCallback(
+    async (orderId: string, patch: OrderStatusPatch) => {
+      await updateOrderStatuses(orderId, patch);
+      const resolvedStatus =
+        String(patch.delivery_status ?? "").toLowerCase() === "delivered"
+          ? "completed"
+          : patch.status;
+
+      setMyOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? {
+                ...row,
+                ...patch,
+                status: resolvedStatus ?? row.status,
+              }
+            : row
+        )
+      );
+      setAllOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? {
+                ...row,
+                ...patch,
+                status: resolvedStatus ?? row.status,
+              }
+            : row
+        )
+      );
+      setSelectedOrderDetail((prev) =>
+        prev && prev.id === orderId
+          ? {
+              ...prev,
+              status: resolvedStatus ?? prev.status,
+              paid_status: patch.paid_status ?? prev.paid_status,
+              delivery_status: patch.delivery_status ?? prev.delivery_status,
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handleOrderPackedQtyChange = React.useCallback(
+    async (orderLineId: string, packedQty: number | null) => {
+      await updateOrderLinePackedQty(orderLineId, packedQty);
+      setSelectedOrderDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((it) =>
+                it.id === orderLineId ? { ...it, packed_qty: packedQty } : it
+              ),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handleOrderAddLines = React.useCallback(
+    async (orderId: string, items: Array<{ productId: string; qty: number }>) => {
+      await addOrderLinesByAdmin(orderId, items);
+      await loadAndSelectOrder(orderId);
+    },
+    [loadAndSelectOrder]
+  );
+
+  const handleOrderAmountPaidChange = React.useCallback(
+    async (orderId: string, amountPaid: number | null) => {
+      await updateOrderAmountPaid(orderId, amountPaid);
+      setSelectedOrderDetail((prev) =>
+        prev && prev.id === orderId
+          ? {
+              ...prev,
+              amount_paid:
+                amountPaid === null || Number.isNaN(Number(amountPaid))
+                  ? null
+                  : Math.max(0, Number(amountPaid)),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handleOrderPaymentProofChange = React.useCallback(
+    async (orderId: string, file: File | null, currentPath: string | null) => {
+      await updateOrderPaymentProof(orderId, file, currentPath);
+      if (selectedOrderDetail?.id === orderId) {
+        await loadAndSelectOrder(orderId);
+      }
+    },
+    [loadAndSelectOrder, selectedOrderDetail?.id]
+  );
+
+  const openMyOrdersDrawer = React.useCallback(() => {
+    const loadMyOrders = async () => {
+      if (!authUserId) {
+        setMyOrders([]);
+        return;
+      }
+      try {
+        const rows = await fetchOrders({
+          userId: authUserId,
+          email: authEmail || null,
+          phone: authPhone || null,
+          all: false,
+        });
+        setMyOrders(rows);
+      } catch (e) {
+        console.error("Failed to load my orders", e);
+      }
+    };
+    setDetailsOpen(false);
+    setAllOrdersOpen(false);
+    setCartOpen(false);
+    setPanel(null);
+    setOrderDrawerSource(null);
+    setSelectedMyOrderId(null);
+    setSelectedAllOrderId(null);
+    setSelectedOrderDetail(null);
+    void loadMyOrders();
+    setOrdersOpen(true);
+  }, [authEmail, authPhone, authUserId]);
+
+  const openAllOrdersDrawer = React.useCallback(() => {
+    const loadAllOrders = async () => {
+      try {
+        const rows = await fetchOrders({ all: true });
+        setAllOrders(rows);
+      } catch (e) {
+        console.error("Failed to load all orders", e);
+      }
+    };
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setCartOpen(false);
+    setPanel(null);
+    setOrderDrawerSource(null);
+    setSelectedMyOrderId(null);
+    setSelectedAllOrderId(null);
+    setSelectedOrderDetail(null);
+    void loadAllOrders();
+    setAllOrdersOpen(true);
+  }, []);
+
+  const composeAddress = React.useCallback((draft: CustomerDraft) => {
+    const d = draft as Record<string, unknown>;
+    return [
+      d["attention_to"],
+      d["line1"],
+      d["line2"],
+      d["barangay"],
+      d["city"],
+      d["province"],
+      d["postal_code"],
+      d["country"] || "Philippines",
+    ]
+      .map((v) => String(v ?? "").trim())
+      .filter(Boolean)
+      .join(", ");
+  }, []);
+
+  const submitCheckout = React.useCallback(async (payload: CheckoutSubmitPayload) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || sessionId === "server") return;
+
+    if (!paymentFile) {
+      alert("Please upload your payment confirmation screenshot first.");
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const ext = paymentFile.name.includes(".")
+      ? paymentFile.name.split(".").pop()?.toLowerCase() ?? "jpg"
+      : "jpg";
+    const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
+    const stamp = Date.now();
+    const ownerKey = user?.id ? `u-${user.id}` : `anon-${sessionId}`;
+    const path = `${ownerKey}/${stamp}.${safeExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("payment-proofs")
+      .upload(path, paymentFile, { upsert: true });
+    if (uploadError) {
+      alert(uploadError.message);
+      return;
+    }
+
+    const customerData = customer as Record<string, unknown>;
+    const customerEmail = String(customerData["email"] ?? "");
+    const customerDeliveryDate = String(customerData["delivery_date"] ?? "");
+    const customerDeliverySlot = String(customerData["delivery_slot"] ?? "");
+    const customerExpress = Boolean(customerData["express_delivery"]);
+    const customerAddThermalBag = Boolean(customerData["add_refer_bag"]);
+
+    const referBagLine = customerAddThermalBag ? "Add thermal bag: yes" : "";
+    const composedNotes = [customer.notes.trim(), referBagLine]
+      .filter(Boolean)
+      .join(" | ");
+
+    let data: unknown;
+    let error: { message: string } | null = null;
+
+    const v2 = await supabase.rpc("checkout_cart_v2", {
+      p_session_id: sessionId,
+      p_full_name: customer.full_name,
+      p_email: customerEmail,
+      p_phone: customer.phone,
+      p_address: composeAddress(customer),
+      p_postal_code: payload.postal_code,
+      p_notes: composedNotes,
+      p_delivery_date: payload.delivery_date,
+      p_delivery_slot: payload.delivery_slot,
+      p_express_delivery: payload.express_delivery,
+      p_add_thermal_bag: payload.add_thermal_bag,
+      p_subtotal: payload.subtotal,
+      p_delivery_fee: payload.delivery_fee,
+      p_thermal_bag_fee: payload.thermal_bag_fee,
+      p_total: payload.total,
+      p_payment_proof_url: path,
+    });
+    data = v2.data;
+    error = (v2.error as any) ?? null;
+
+    // Backward compatibility until SQL v2 is applied.
+    if (error && String(error.message).toLowerCase().includes("checkout_cart_v2")) {
+      const v1 = await supabase.rpc("checkout_cart", {
+        p_session_id: sessionId,
+        p_full_name: customer.full_name,
+        p_phone: customer.phone,
+        p_address: composeAddress(customer),
+        p_notes: composedNotes,
+        p_payment_proof_url: path,
+      });
+      data = v1.data;
+      error = (v1.error as any) ?? null;
+    }
+
+    if (error) {
+      console.error(error);
+      alert(error.message);
+      return;
+    }
+
+    // Enforce initial workflow statuses for newly submitted orders.
+    const orderId =
+      typeof data === "string"
+        ? data
+        : data && typeof data === "object"
+          ? (() => {
+              const row = data as Record<string, unknown>;
+              const candidate =
+                row["id"] ?? row["order_id"] ?? row["checkout_cart_v2"] ?? row["checkout_cart"];
+              return typeof candidate === "string" ? candidate : null;
+            })()
+          : null;
+    if (orderId) {
+      const { error: statusError } = await supabase
+        .from("orders")
+        .update({
+          status: "submitted",
+          paid_status: "processed",
+          delivery_status: "unpacked",
+          amount_paid: payload.total,
+        })
+        .eq("id", orderId);
+      if (statusError) {
+        console.warn("[checkout] initial status update failed:", statusError.message);
+      }
+    }
+
+    // Try to clear the cart lines on the backend for this session.
+    await Promise.all(
+      cartItems.map((it) =>
+        setCartLineQty(sessionId, String(it.productId), 0).catch(() => null)
+      )
+    );
+    await refreshCart();
+    if (user?.id && saveAddressToProfile) {
+      const profileDraft = customer as Record<string, unknown>;
+      const nameParts = customer.full_name.trim().split(/\s+/);
+      const firstName = nameParts[0] ?? "";
+      const lastName = nameParts.slice(1).join(" ");
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          first_name: firstName || null,
+          last_name: lastName || null,
+          phone: String(profileDraft["phone"] ?? "") || null,
+          attention_to: String(profileDraft["attention_to"] ?? "") || null,
+          address_line1: String(profileDraft["line1"] ?? "") || null,
+          address_line2: String(profileDraft["line2"] ?? "") || null,
+          barangay: String(profileDraft["barangay"] ?? "") || null,
+          city: String(profileDraft["city"] ?? "") || null,
+          province: String(profileDraft["province"] ?? "") || null,
+          postal_code: String(profileDraft["postal_code"] ?? "") || null,
+          country: String(profileDraft["country"] ?? "") || "Philippines",
+          delivery_note: String(profileDraft["notes"] ?? "") || null,
+        },
+        { onConflict: "id" }
+      );
+    }
+    if (!user?.id && createAccountFromDetails) {
+      setAuthOpen(true);
     }
     setPaymentFile(null);
+    setCustomer(blankCustomer());
+    setCreateAccountFromDetails(false);
+    setSaveAddressToProfile(false);
+    setPanel(null);
+    scrollToProducts();
+    alert(`Order created: ${data}`);
+  }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts]);
 
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+  const selectedProductImages: ProductImage[] = React.useMemo(() => {
+    if (!selectedId) return [];
+    return productImagesById[selectedId] ?? [];
+  }, [productImagesById, selectedId]);
 
-  const startCheckout = () => {
-    if (items.length === 0) return;
+  const handleCheckoutSubmit: (payload: CheckoutSubmitPayload) => void = React.useCallback(
+    (payload: CheckoutSubmitPayload) => {
+      void submitCheckout(payload);
+    },
+    [submitCheckout]
+  );
 
-    // Create a draft snapshot of current cart
-    const now = new Date().toISOString();
-    const newDraft = {
-      id: makeOrderId(),
-      status: "draft",
-      createdAt: now,
-      items: items.map((i) => ({
-        productId: i.id,
-        name: i.name,
-        size: i.size,
-        unitPrice: i.price,
-        qty: i.qty,
-        lineTotal: i.price * i.qty,
-      })),
-      totalUnits,
-      total,
-    };
-
-    setDraft(newDraft);
-    setPanel("checkout");
-  };
-
-  const isCheckoutValid = useMemo(() => {
-    if (!draft) return false;
-    const nameOk = customer.name.trim().length >= 2;
-    const phoneOk = customer.phone.trim().length >= 7;
-    const addressOk = customer.address.trim().length >= 6;
-    const paymentOk = !!paymentFile;
-    return nameOk && phoneOk && addressOk && paymentOk;
-  }, [draft, customer, paymentFile]);
-
-  const onPickPaymentProof = (file: File | null) => {
-    if (!file) return;
-    if (paymentPreviewUrl) URL.revokeObjectURL(paymentPreviewUrl);
-
-    const url = URL.createObjectURL(file);
-    setPaymentFile(file);
-    setPaymentPreviewUrl(url);
-  };
-
-  const submitOrder = () => {
-    if (!draft) return;
-    if (!isCheckoutValid) return;
-
-    // MVP: store proof metadata only (no binary upload in this preview)
-    const finalOrder = {
-      ...draft,
-      status: "submitted",
-      submittedAt: new Date().toISOString(),
-      customer: {
-        name: customer.name.trim(),
-        phone: customer.phone.trim(),
-        address: customer.address.trim(),
-        notes: customer.notes.trim(),
-      },
-      paymentProof: paymentFile
-        ? {
-            name: paymentFile.name,
-            size: paymentFile.size,
-            type: paymentFile.type,
-          }
-        : null,
-    };
-
-    setOrders((prev) => [finalOrder, ...prev]);
-    setCheckoutState("success");
-
-    // Clear cart after submit (common flow)
-    setCart({});
-  };
-
-  const closeCheckout = () => {
-    resetCheckoutArtifacts();
-    closePanel();
-  };
-
-  // Optional lightweight tests (disabled by default)
-  const __TESTS__ = false;
-  if (__TESTS__) {
-    console.assert(
-      matchesQuery(products[0], "ribeye") === true,
-      "search: ribeye should match"
-    );
-    console.assert(
-      matchesQuery(products[0], "tenderloin") === false,
-      "search: tenderloin should not match ribeye"
-    );
-    console.assert(
-      matchesQuery(products[1], "4–6") === true,
-      "search: should match size text"
-    );
-
-    console.assert(
-      matchesQuery(products[0], "") === true,
-      "search: empty query should match all"
-    );
-    console.assert(
-      matchesQuery(products[0], "RIBEYE") === true,
-      "search: should be case-insensitive"
-    );
-    console.assert(
-      matchesQuery(products[1], "filet") === true,
-      "search: should match keywords"
-    );
-
-    const oid = makeOrderId();
-    console.assert(
-      oid.startsWith("MP-") === true,
-      "order id should start with MP-"
-    );
-
-    console.assert(
-      formatMoney(1000) === "1,000" || formatMoney(1000) === "1000",
-      "formatMoney should format with locale grouping"
-    );
-  }
+  const handleCartOpenProduct: (id: string) => void = React.useCallback(
+    (id: string) => {
+      setCartOpen(false);
+      openProduct(id);
+    },
+    [openProduct]
+  );
 
   return (
-    <div style={styles.page}>
-      <div style={styles.stickyWrap}>
-        <div style={styles.containerTop}>
-          <header style={styles.header}>
-            <h1 style={styles.logo}>MERVILLE PRIME</h1>
-            <p style={styles.tagline}>
-              Old-school butchery • Modern preparation • Trusted quality
-            </p>
-          </header>
+    <div
+      data-tp-mode={themeMode}
+      style={{
+        ...styles.page,
+        ...(mainZoneStyle ?? null),
+      }}
+    >
+      {/* Header */}
+      <div ref={headerRef} style={{ ...styles.headerWrap, ...headerZoneStyle }}>
+        <div style={styles.headerInner}>
+          <button
+            type="button"
+            style={styles.headerThemeBtn}
+            onClick={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
+            title="Toggle dark / light mode"
+          >
+            {themeMode === "dark" ? "LIGHTS ON" : "LIGHTS OFF"}
+          </button>
+          <div style={styles.brandWrap}>
+            {(logoUrlsByMode[themeMode] ?? "").trim() ? (
+              <img src={(logoUrlsByMode[themeMode] ?? "").trim()} alt="Merville Prime" style={styles.brandLogo} />
+            ) : (
+              <div style={styles.brand}>MERVILLE PRIME</div>
+            )}
+            {isAdmin && editMode ? (
+              <button
+                type="button"
+                style={styles.logoEditBtn}
+                onClick={() => {
+                  setLogoEditorError("");
+                  setLogoEditorOpen(true);
+                }}
+                aria-label="Edit logo"
+                title="Edit logo"
+              >
+                <SettingsIcon size={16} />
+              </button>
+            ) : null}
+          </div>
+          {isAdmin && editMode ? (
+            <button
+              type="button"
+              style={styles.zoneEditBtn}
+              onClick={() => openZoneEditor("header")}
+              aria-label="Edit header zone"
+              title="Edit header zone"
+            >
+              <SettingsIcon size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Navbar */}
+      <div ref={navRef}>
+        <Navbar
+          search={search}
+          setSearch={setSearch}
+          totalUnits={totalUnits}
+          subtotal={subtotal}
+          onOpenCart={() => {
+            setDetailsOpen(false);
+            setOrdersOpen(false);
+            setAllOrdersOpen(false);
+            setPanel(null);
+            setCartOpen(true);
+          }}
+          onShop={() => {
+            setDetailsOpen(false);
+            setOrdersOpen(false);
+            setAllOrdersOpen(false);
+            setOrderDrawerSource(null);
+            setSelectedOrderDetail(null);
+            setCartOpen(false);
+            setAdminAllProductsMode(false);
+            setPanel(null);
+            scrollToProducts();
+          }}
+          gridView={resolvedGridView}
+          onChangeGridView={setGridView}
+          authLabel={authLabel}
+          onOpenAuth={() => setAuthOpen(true)}
+          onOpenProfile={openProfileDrawer}
+          onOpenOrders={openMyOrdersDrawer}
+          isAdmin={isAdmin}
+          editMode={editMode}
+          onToggleEditMode={toggleEditMode}
+          onOpenAllOrders={openAllOrdersDrawer}
+          onOpenAllProducts={openAllProductsView}
+          onLogout={logout}
+          navTone={navbarTone}
+          zoneStyle={navbarDisplayStyle}
+          showZoneEditor={isAdmin && editMode}
+          onOpenZoneEditor={() => openZoneEditor("navbar")}
+          formatMoney={formatMoney}
+          searchStartOffset={isMobileViewport ? 0 : 252}
+          isMobile={isMobileViewport}
+        />
+      </div>
+
+      {/* Products list */}
+      <div
+        ref={listScrollRef}
+        style={{
+          ...styles.listScroll,
+          ...(mainZoneStyle ?? null),
+          height: `calc(100vh - ${topOffset}px)`,
+        }}
+      >
+        {isAdmin && editMode ? (
+          <button
+            type="button"
+            style={styles.mainZoneEditBtn}
+            onClick={() => openZoneEditor("main")}
+            aria-label="Edit main zone"
+            title="Edit main zone"
+          >
+            <SettingsIcon size={16} />
+          </button>
+        ) : null}
+        <div
+          style={{
+            ...styles.productsLayout,
+            width: isMobileViewport ? "100%" : "var(--tp-rail-width)",
+            gridTemplateColumns: isMobileViewport ? "1fr" : "250px minmax(0, 1fr)",
+          }}
+        >
+          {!isMobileViewport ? (
+            <aside style={styles.filterPanel}>
+              {isAdmin && adminAllProductsMode ? (
+                <button type="button" style={styles.createBtn} onClick={() => void createProduct()}>
+                  CREATE
+                </button>
+              ) : null}
+              <div style={styles.filterTitle}>FILTERS</div>
+              <div style={styles.filterActions}>
+                <button
+                  type="button"
+                  style={styles.filterActionBtn}
+                  onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  style={styles.filterActionBtn}
+                  onClick={() => setSelectedTypes([])}
+                >
+                  None
+                </button>
+              </div>
+              <div style={styles.filterList}>
+                {productTypes.map((typeItem) => (
+                  <label key={typeItem.key} style={styles.filterItem}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTypes.includes(typeItem.key)}
+                      onChange={() =>
+                        setSelectedTypes((prev) =>
+                          prev.includes(typeItem.key)
+                            ? prev.filter((t) => t !== typeItem.key)
+                            : [...prev, typeItem.key]
+                        )
+                      }
+                    />
+                    <span>{typeItem.label}</span>
+                  </label>
+                ))}
+              </div>
+            </aside>
+          ) : null}
+
+          <div style={styles.gridWrap}>
+            <ProductGrid
+              products={filteredProducts}
+              loading={loadingProducts}
+              cart={cart}
+              viewMode={resolvedGridView}
+              contained
+              canEditProducts={isAdmin && (editMode || adminAllProductsMode)}
+              onAdd={addToCart}
+              onRemove={removeFromCart}
+              onOpenProduct={openProduct}
+              onEditProduct={openEditProduct}
+              onQuickStatusChange={updateProductStatus}
+              formatMoney={formatMoney}
+            />
+          </div>
         </div>
 
-        <nav style={styles.navbar}>
-          <div style={styles.navInner}>
-            <div style={styles.navLeft}>
-              <button
-                style={styles.navBtn}
-                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              >
-                Shop
-              </button>
-            </div>
-
-            <div style={styles.navCenter}>
-              <input
-                style={styles.navSearch}
-                placeholder="Search cuts, weight, format, keywords…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search products"
+        {isMobileViewport ? (
+          <button
+            type="button"
+            style={{
+              ...styles.mobileFilterFab,
+              ...(selectedTypes.length > 0 ? styles.mobileFilterFabActive : null),
+            }}
+            onClick={() => setMobileFiltersOpen((v) => !v)}
+            aria-label="Open filters"
+            title="Filters"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                d="M4 7h16M7 12h10M10 17h4"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
               />
-              {search.trim().length > 0 && (
-                <button style={styles.navClear} onClick={() => setSearch("")}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-
-            <div style={styles.navRight}>
-              <button style={styles.navBtn} onClick={openCart}>
-                Cart ({totalUnits}) — ₱ {formatMoney(total)}
-              </button>
-            </div>
-          </div>
-        </nav>
-      </div>
-
-      <div style={styles.container}>
-        <section style={styles.products}>
-          {filteredProducts.map((p) => (
-            <div
-              key={p.id}
-              style={styles.card}
-              role="button"
-              tabIndex={0}
-              onClick={() => openProduct(p.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") openProduct(p.id);
-              }}
+            </svg>
+            {selectedTypes.length > 0 ? (
+              <span style={styles.mobileFilterBadge}>{selectedTypes.length}</span>
+            ) : null}
+          </button>
+        ) : null}
+        {isMobileViewport && mobileFiltersOpen ? (
+          <div style={styles.mobileFilterModalBackdrop} onClick={() => setMobileFiltersOpen(false)}>
+            <aside
+              className="tp-sheet-slide-up"
+              style={styles.mobileFilterModal}
+              onClick={(e) => e.stopPropagation()}
             >
-              <div style={styles.imageTile}>
-                <div style={styles.imageTileInner}>
-                  <div style={styles.imageTileLabel}>IMAGE</div>
-                </div>
-              </div>
-
-              <h3 style={styles.productName}>{p.name}</h3>
-              <div style={styles.size}>{p.size}</div>
-              <div style={styles.note}>{p.note}</div>
-              <div style={styles.price}>₱ {formatMoney(p.price)}</div>
-
-              <div style={styles.qtyRow} onClick={(e) => e.stopPropagation()}>
-                <button style={styles.qtyBtn} onClick={() => remove(p.id)}>
-                  -
+              {isAdmin && adminAllProductsMode ? (
+                <button type="button" style={styles.createBtn} onClick={() => void createProduct()}>
+                  CREATE
                 </button>
-                <div style={styles.qty}>{cart[p.id] || 0}</div>
-                <button style={styles.qtyBtn} onClick={() => add(p.id)}>
-                  +
+              ) : null}
+              <div style={styles.filterTitle}>FILTERS</div>
+              <div style={styles.filterActions}>
+                <button
+                  type="button"
+                  style={styles.filterActionBtn}
+                  onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  style={styles.filterActionBtn}
+                  onClick={() => setSelectedTypes([])}
+                >
+                  None
                 </button>
               </div>
-            </div>
-          ))}
-        </section>
-
-        {filteredProducts.length === 0 && (
-          <div style={styles.emptyHint}>
-            No results for “{search.trim()}”. Try a different keyword.
+              <div style={styles.filterList}>
+                {productTypes.map((typeItem) => (
+                  <label key={typeItem.key} style={styles.filterItem}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTypes.includes(typeItem.key)}
+                      onChange={() =>
+                        setSelectedTypes((prev) =>
+                          prev.includes(typeItem.key)
+                            ? prev.filter((t) => t !== typeItem.key)
+                            : [...prev, typeItem.key]
+                        )
+                      }
+                    />
+                    <span>{typeItem.label}</span>
+                  </label>
+                ))}
+              </div>
+              <button
+                type="button"
+                style={styles.mobileFilterCloseBtn}
+                onClick={() => setMobileFiltersOpen(false)}
+              >
+                CLOSE
+              </button>
+            </aside>
           </div>
-        )}
+        ) : null}
 
-        {items.length === 0 && (
-          <div style={styles.emptyHint}>
-            Add items to your cart using the +/- controls.
-          </div>
-        )}
       </div>
 
-      {/* Backdrop for drawers/panels */}
-      <div
-        style={{
-          ...styles.backdrop,
-          opacity: panel ? 1 : 0,
-          pointerEvents: panel ? "auto" : "none",
-        }}
-        onClick={() => {
-          if (panel === "checkout") return; // checkout must be closed via controls
-          closePanel();
+      {/* Product drawer */}
+      <ProductDrawer
+        isOpen={panel === "product"}
+        topOffset={topOffset}
+        product={selectedProduct}
+        images={selectedProductImages}
+        qty={selectedId ? cart[selectedId] ?? 0 : 0}
+        onBack={backToList}
+        canEdit={isAdmin && editMode}
+        onEdit={openEditProduct}
+        onAdd={addToCart}
+        onRemove={removeFromCart}
+        formatMoney={formatMoney}
+        backgroundStyle={mainZoneStyle}
+      />
+
+      <ProductEditorDrawer
+        isOpen={panel === "edit"}
+        topOffset={topOffset}
+        product={selectedProduct}
+        images={selectedProductImages}
+        backgroundStyle={mainZoneStyle}
+        onClose={closeEditor}
+        onSaved={loadCatalog}
+        onDeleted={async () => {
+          await loadCatalog();
+          setPanel(null);
+          setSelectedId(null);
+          setEditorReturnToProduct(false);
         }}
       />
 
-      {/* PRODUCT PANEL */}
-      <aside
-        style={{
-          ...styles.productPanel,
-          opacity: panel === "product" ? 1 : 0,
-          pointerEvents: panel === "product" ? "auto" : "none",
-          transform:
-            panel === "product"
-              ? "translateX(-50%) scale(1)"
-              : "translateX(-50%) scale(0.985)",
+      {/* Checkout drawer */}
+      <CheckoutDrawer
+        isOpen={panel === "checkout"}
+        topOffset={topOffset}
+        items={cartItemsForDisplay}
+        total={subtotal}
+        customer={customer as CustomerDraft}
+        setCustomer={handleSetCustomer}
+        isLoggedIn={!!authUserId}
+        createAccountFromDetails={createAccountFromDetails}
+        setCreateAccountFromDetails={setCreateAccountFromDetails}
+        suggestSaveAddressToProfile={!!authUserId && !profileHasAddress}
+        saveAddressToProfile={saveAddressToProfile}
+        setSaveAddressToProfile={setSaveAddressToProfile}
+        profileAddress={profileAddress}
+        paymentFile={paymentFile}
+        setPaymentFile={setPaymentFile}
+        onBack={backToList}
+        onSubmit={handleCheckoutSubmit as (payload: CheckoutSubmitPayload) => void}
+        onOpenProfile={openProfileDrawer}
+        onAddItem={addToCart}
+        onRemoveItem={removeFromCart}
+        formatMoney={formatMoney}
+        backgroundStyle={mainZoneStyle}
+      />
+
+      {/* Cart drawer */}
+      <CartDrawer
+        isOpen={cartOpen}
+        items={cartItemsForDisplay}
+        subtotal={subtotal}
+        onClose={() => setCartOpen(false)}
+        onOpenProduct={handleCartOpenProduct as (id: string) => void}
+        onAdd={addToCart}
+        onRemove={removeFromCart}
+        onCheckout={openCheckout}
+        formatMoney={formatMoney}
+        backgroundStyle={mainZoneStyle}
+      />
+
+      <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+      <MyDetailsDrawer
+        isOpen={detailsOpen}
+        topOffset={topOffset}
+        userId={authUserId}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => setDetailsOpen(false)}
+      />
+
+      <MyOrdersDrawer
+        isOpen={ordersOpen}
+        topOffset={topOffset}
+        title="MY ORDERS"
+        orders={myOrders}
+        selectedOrderId={selectedMyOrderId}
+        onSelectOrder={(id) => {
+          setSelectedMyOrderId(id);
+          setOrderDrawerSource("my");
+          void loadAndSelectOrder(id);
         }}
-        aria-hidden={panel !== "product"}
-      >
-        {selected && (
-          <div style={styles.productPanelInner}>
-            <div style={styles.productTopBand}>
-              <button style={styles.drawerBackBtnTop} onClick={closePanel}>
-                Back
-              </button>
-            </div>
-
-            <div style={styles.drawerGrid}>
-              <div style={styles.drawerLeft}>
-                <div style={styles.drawerImage}>
-                  <div style={styles.drawerImageInner}>
-                    <div style={styles.drawerImageLabel}>MAIN IMAGE</div>
-                    <div style={styles.thumbRow}>
-                      <div style={styles.thumb}>IMG</div>
-                      <div style={styles.thumb}>IMG</div>
-                      <div style={styles.thumb}>IMG</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={styles.drawerRight}>
-                <div style={styles.drawerBody}>
-                  <div style={styles.drawerName}>{selected.name}</div>
-                  <div style={styles.drawerMeta}>{selected.size}</div>
-                  <div style={styles.drawerNote}>{selected.note}</div>
-                  <div style={styles.drawerPrice}>
-                    ₱ {formatMoney(selected.price)}
-                  </div>
-
-                  <div style={styles.drawerDesc}>{selected.description}</div>
-
-                  <div style={styles.drawerQtyRow}>
-                    <button style={styles.qtyBtn} onClick={() => remove(selected.id)}>
-                      -
-                    </button>
-                    <div style={{ ...styles.qty, width: 40 }}>
-                      {cart[selected.id] || 0}
-                    </div>
-                    <button style={styles.qtyBtn} onClick={() => add(selected.id)}>
-                      +
-                    </button>
-                  </div>
-
-                  <div style={styles.drawerFooterHint}>
-                    Delivered chilled • Vacuum packed • Prepared with care
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </aside>
-
-      {/* CART PANEL */}
-      <aside
-        style={{
-          ...styles.cartPanel,
-          transform: panel === "cart" ? "translateX(0)" : "translateX(100%)",
-          pointerEvents: panel === "cart" ? "auto" : "none",
+        backgroundStyle={mainZoneStyle}
+        onClose={() => {
+          setOrderDrawerSource(null);
+          setSelectedOrderDetail(null);
+          setOrdersOpen(false);
         }}
-        aria-hidden={panel !== "cart"}
-      >
-        <div style={styles.cartPanelHeader}>
-          <div style={styles.cartPanelTitle}>Your Cart</div>
-          <button style={styles.closeBtn} onClick={closePanel}>
-            Close
-          </button>
-        </div>
+      />
 
-        <div style={styles.cartPanelBody}>
-          {items.length === 0 ? (
-            <div style={{ color: "#aaa", lineHeight: 1.6 }}>
-              Your cart is empty.
-              <div style={{ marginTop: 10, color: "#777", fontSize: 13 }}>
-                Add items using the +/- controls on any product.
-              </div>
-            </div>
-          ) : (
-            <>
-              {items.map((i) => (
-                <div key={i.id} style={styles.cartLine}>
-                  <div style={styles.cartLineName}>
-                    <div style={{ fontSize: 14 }}>{i.name}</div>
-                    <div style={{ color: "#777", fontSize: 12, marginTop: 2 }}>
-                      {i.size}
-                    </div>
-                  </div>
-
-                  <div style={styles.cartLineRight}>
-                    <button style={styles.qtyBtnSm} onClick={() => remove(i.id)}>
-                      -
-                    </button>
-                    <div style={styles.qtySm}>{i.qty}</div>
-                    <button style={styles.qtyBtnSm} onClick={() => add(i.id)}>
-                      +
-                    </button>
-                    <div style={styles.cartLineTotal}>
-                      ₱ {formatMoney(i.price * i.qty)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <div style={styles.cartPanelTotalRow}>
-                <div style={{ color: "#bbb" }}>Total</div>
-                <div style={styles.cartPanelTotalValue}>₱ {formatMoney(total)}</div>
-              </div>
-
-              <button style={styles.confirmBtnWide} onClick={startCheckout}>
-                Checkout
-              </button>
-
-              <div style={styles.cartPanelFootnote}>
-                Delivery within Merville • Cashless payment • Prepared with care
-              </div>
-            </>
-          )}
-        </div>
-      </aside>
-
-      {/* CHECKOUT PANEL (full width under navbar) */}
-      <aside
-        style={{
-          ...styles.checkoutPanel,
-          transform: panel === "checkout" ? "translateY(0)" : "translateY(10px)",
-          opacity: panel === "checkout" ? 1 : 0,
-          pointerEvents: panel === "checkout" ? "auto" : "none",
+      <MyOrdersDrawer
+        isOpen={allOrdersOpen}
+        topOffset={topOffset}
+        title="ALL ORDERS"
+        showSearch
+        orders={allOrders}
+        selectedOrderId={selectedAllOrderId}
+        onSelectOrder={(id) => {
+          setSelectedAllOrderId(id);
+          setOrderDrawerSource("all");
+          void loadAndSelectOrder(id);
         }}
-        aria-hidden={panel !== "checkout"}
-      >
-        <div style={styles.checkoutHeader}>
-          <div style={styles.checkoutHeaderLeft}>
-            <button style={styles.checkoutBackBtn} onClick={closeCheckout}>
-              Back
-            </button>
-            <div>
-              <div style={styles.checkoutTitle}>Checkout</div>
-              <div style={styles.checkoutSub}>Pay via QR • Upload proof • Send order</div>
-            </div>
-          </div>
+        backgroundStyle={mainZoneStyle}
+        onClose={() => {
+          setOrderDrawerSource(null);
+          setSelectedOrderDetail(null);
+          setAllOrdersOpen(false);
+        }}
+      />
 
-          <div style={styles.checkoutHeaderRight}>
-            <div style={styles.checkoutOrderId}>{draft ? draft.id : ""}</div>
-          </div>
-        </div>
+      <OrderDrawer
+        isOpen={!!orderDrawerSource && !!selectedOrderDetail}
+        topOffset={topOffset}
+        detail={selectedOrderDetail}
+        products={products}
+        loading={loadingOrderDetail}
+        canEdit={orderDrawerSource === "all"}
+        onChangeStatuses={handleOrderStatusChange}
+        onChangePackedQty={handleOrderPackedQtyChange}
+        onAddLines={handleOrderAddLines}
+        onChangeAmountPaid={handleOrderAmountPaidChange}
+        onChangePaymentProof={handleOrderPaymentProofChange}
+        onBack={() => {
+          setOrderDrawerSource(null);
+          setSelectedOrderDetail(null);
+        }}
+        backgroundStyle={mainZoneStyle}
+      />
 
-        <div style={styles.checkoutBody}>
-          {checkoutState === "success" && draft ? (
-            <div style={styles.successWrap}>
-              <div style={styles.successBadge}>ORDER RECEIVED</div>
-              <div style={styles.successTitle}>Thank you.</div>
-              <div style={styles.successText}>
-                We’ll confirm your payment and message you for delivery.
-              </div>
-              <div style={styles.successCard}>
-                <div style={{ color: "#bbb", fontSize: 12, letterSpacing: 1 }}>
-                  Order ID
-                </div>
-                <div style={{ fontSize: 18, marginTop: 6 }}>{draft.id}</div>
-                <div style={{ marginTop: 10, color: "#bbb" }}>
-                  Total: ₱ {formatMoney(draft.total)}
-                </div>
-              </div>
-              <button
-                style={styles.successBtn}
-                onClick={() => {
-                  resetCheckoutArtifacts();
-                  closePanel();
-                }}
-              >
-                Back to Shop
-              </button>
-            </div>
-          ) : (
-            <div style={styles.checkoutGrid}>
-              {/* LEFT: customer + proof */}
-              <div style={styles.checkoutLeft}>
-                <div style={styles.sectionTitle}>Customer Details</div>
+      <ZoneStyleModal
+        isOpen={zoneEditorOpen}
+        zoneLabel={zoneEditorTarget}
+        initial={zoneStylesByMode[themeMode][zoneEditorTarget]}
+        saving={zoneEditorSaving}
+        error={zoneEditorError}
+        onClose={() => setZoneEditorOpen(false)}
+        onSave={saveZoneStyle}
+        onUploadFile={(file) => uploadUiAsset(file, "zone")}
+        themeMode={themeMode}
+        onThemeModeChange={setThemeMode}
+      />
 
-                <div style={styles.fieldGrid}>
-                  <label style={styles.fieldLabel}>
-                    Full name*
-                    <input
-                      style={styles.input}
-                      value={customer.name}
-                      onChange={(e) =>
-                        setCustomer((c) => ({ ...c, name: e.target.value }))
-                      }
-                      placeholder="e.g. Juan Dela Cruz"
-                    />
-                  </label>
-
-                  <label style={styles.fieldLabel}>
-                    Mobile number*
-                    <input
-                      style={styles.input}
-                      value={customer.phone}
-                      onChange={(e) =>
-                        setCustomer((c) => ({ ...c, phone: e.target.value }))
-                      }
-                      placeholder="e.g. 09xx xxx xxxx"
-                      inputMode="tel"
-                    />
-                  </label>
-
-                  <label style={styles.fieldLabel}>
-                    Delivery address*
-                    <textarea
-                      style={{ ...styles.input, height: 88, resize: "none" }}
-                      value={customer.address}
-                      onChange={(e) =>
-                        setCustomer((c) => ({ ...c, address: e.target.value }))
-                      }
-                      placeholder="House #, street, barangay (Merville)"
-                    />
-                  </label>
-
-                  <label style={styles.fieldLabel}>
-                    Notes (optional)
-                    <textarea
-                      style={{ ...styles.input, height: 72, resize: "none" }}
-                      value={customer.notes}
-                      onChange={(e) =>
-                        setCustomer((c) => ({ ...c, notes: e.target.value }))
-                      }
-                      placeholder="Preferred delivery time, gate instructions, etc."
-                    />
-                  </label>
-                </div>
-
-                <div style={styles.sectionTitle}>Payment Proof</div>
-
-                <div style={styles.proofRow}>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => onPickPaymentProof(e.target.files?.[0] || null)}
-                    style={{ display: "none" }}
-                  />
-
-                  <button
-                    style={styles.uploadBtn}
-                    onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                  >
-                    Upload Screenshot
-                  </button>
-
-                  {paymentFile && (
-                    <button
-                      style={styles.secondaryBtn}
-                      onClick={() => {
-                        if (paymentPreviewUrl) URL.revokeObjectURL(paymentPreviewUrl);
-                        setPaymentPreviewUrl(null);
-                        setPaymentFile(null);
-                        if (fileInputRef.current) fileInputRef.current.value = "";
-                      }}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-
-                {paymentPreviewUrl ? (
-                  <div style={styles.proofPreview}>
-                    <img
-                      src={paymentPreviewUrl}
-                      alt="Payment proof preview"
-                      style={styles.proofImg}
-                    />
-                  </div>
-                ) : (
-                  <div style={styles.proofHint}>
-                    Upload a screenshot/photo of your payment confirmation.
-                  </div>
-                )}
-
-                <div style={styles.checkoutActions}>
-                  <button
-                    style={{
-                      ...styles.sendBtn,
-                      opacity: isCheckoutValid ? 1 : 0.4,
-                      cursor: isCheckoutValid ? "pointer" : "not-allowed",
-                    }}
-                    onClick={submitOrder}
-                    disabled={!isCheckoutValid}
-                  >
-                    Send Order
-                  </button>
-
-                  <div style={styles.validationHint}>
-                    * Required fields. Payment proof required.
-                  </div>
-                </div>
-              </div>
-
-              {/* RIGHT: summary + QR */}
-              <div style={styles.checkoutRight}>
-                <div style={styles.sectionTitle}>Order Summary</div>
-
-                <div style={styles.summaryCard}>
-                  {(draft?.items || []).map((li: any) => (
-                    <div key={`${li.productId}`} style={styles.summaryLine}>
-                      <div style={styles.summaryLineLeft}>
-                        <div style={{ fontSize: 14 }}>{li.name}</div>
-                        <div style={{ color: "#777", fontSize: 12, marginTop: 2 }}>
-                          {li.size} • x{li.qty}
-                        </div>
-                      </div>
-                      <div style={styles.summaryLineRight}>₱ {formatMoney(li.lineTotal)}</div>
-                    </div>
-                  ))}
-
-                  <div style={styles.summaryTotalRow}>
-                    <div style={{ color: "#bbb" }}>Total</div>
-                    <div style={styles.summaryTotalValue}>
-                      ₱ {formatMoney(draft?.total || 0)}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={styles.sectionTitle}>Pay via QR</div>
-
-                <div style={styles.qrCard}>
-                  <div style={styles.qrTile}>
-                    <svg viewBox="0 0 200 200" width="160" height="160" aria-label="QR code placeholder">
-                      <rect x="0" y="0" width="200" height="200" fill="#fff" />
-                      <rect x="16" y="16" width="56" height="56" fill="#000" />
-                      <rect x="128" y="16" width="56" height="56" fill="#000" />
-                      <rect x="16" y="128" width="56" height="56" fill="#000" />
-                      <rect x="92" y="92" width="16" height="16" fill="#000" />
-                      <rect x="112" y="92" width="16" height="16" fill="#000" />
-                      <rect x="92" y="112" width="16" height="16" fill="#000" />
-                      <rect x="60" y="92" width="16" height="16" fill="#000" />
-                      <rect x="140" y="112" width="16" height="16" fill="#000" />
-                      <rect x="112" y="140" width="16" height="16" fill="#000" />
-                      <rect x="92" y="140" width="16" height="16" fill="#000" />
-                      <rect x="140" y="92" width="16" height="16" fill="#000" />
-                      <rect x="92" y="60" width="16" height="16" fill="#000" />
-                      <rect x="112" y="60" width="16" height="16" fill="#000" />
-                    </svg>
-                  </div>
-
-                  <div style={styles.qrText}>
-                    <div style={styles.qrTitle}>Merville Prime</div>
-                    <div style={styles.qrSub}>
-                      Scan this QR to pay. Then upload your confirmation screenshot.
-                    </div>
-                    <div style={styles.qrMeta}>Amount: ₱ {formatMoney(draft?.total || 0)}</div>
-                  </div>
-                </div>
-
-                <div style={styles.qrHint}>Tip: Use the exact total amount for faster verification.</div>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      
+      <LogoEditorModal
+        isOpen={logoEditorOpen}
+        initialUrl={logoUrlsByMode[themeMode] ?? ""}
+        saving={logoEditorSaving}
+        error={logoEditorError}
+        onClose={() => setLogoEditorOpen(false)}
+        onSave={saveLogo}
+        onUploadFile={(file) => uploadUiAsset(file, "logo")}
+        themeMode={themeMode}
+        onThemeModeChange={setThemeMode}
+      />
     </div>
   );
 }
 
-const styles: Record<string, any> = {
+const styles: Record<string, React.CSSProperties> = {
   page: {
-    background: "#000",
     minHeight: "100vh",
-    color: "#fff",
-    fontFamily: "\"Playfair Display\", Georgia, serif",
-    backgroundImage:
-      "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 40%), radial-gradient(circle at 80% 0%, rgba(255,255,255,0.03), transparent 45%), radial-gradient(circle at 50% 80%, rgba(255,255,255,0.025), transparent 50%)",
-    backgroundBlendMode: "overlay",
+    background: "black",
+    color: "var(--tp-text-color)",
   },
-  stickyWrap: {
+  headerWrap: {
     position: "sticky",
     top: 0,
-    zIndex: 50,
-    background: "#000",
-    paddingTop: 8,
+    zIndex: 40,
+    background: "black",
+    borderBottom: "1px solid var(--tp-border-color-soft)",
   },
-  containerTop: {
-    maxWidth: 900,
-    margin: "0 auto",
-    padding: "20px 20px 10px",
-  },
-  container: {
-    maxWidth: 900,
-    margin: "0 auto",
-    padding: "28px 20px 80px",
-  },
-  header: { textAlign: "center", marginBottom: 8 },
-  logo: { letterSpacing: 4, fontSize: 28, margin: 0 },
-  tagline: { color: "#aaa", fontStyle: "italic", fontSize: 13, margin: 0 },
-
-  // White bar
-  navbar: {
-    width: "100vw",
-    marginLeft: "calc(50% - 50vw)",
-    background: "rgba(255,255,255,0.92)",
-    backdropFilter: "blur(6px)",
-    WebkitBackdropFilter: "blur(6px)",
-    color: "#000",
-    borderTop: "1px solid #e6e6e6",
-    borderBottom: "1px solid #e6e6e6",
-
-  },
-  navInner: {
-    maxWidth: 900,
-    margin: "0 auto",
-    padding: "8px 20px",
-    display: "grid",
-    gridTemplateColumns: "auto 1fr auto",
-    alignItems: "center",
-    gap: 12,
-  },
-  navLeft: { display: "flex", alignItems: "center" },
-  navCenter: {
+  headerInner: {
     position: "relative",
+    minHeight: 116,
     display: "flex",
-    alignItems: "center",
+    flexDirection: "column",
     justifyContent: "center",
-    minWidth: 0,
+    alignItems: "center",
+    gap: 0,
+    padding: "8px 0",
   },
-  navRight: { display: "flex", justifyContent: "flex-end" },
-  navBtn: {
+  brandWrap: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+  },
+  headerThemeBtn: {
+    position: "absolute",
+    left: 8,
+    top: 10,
+    height: 40,
+    borderRadius: 12,
+    border: "1px solid var(--tp-text-color)",
     background: "transparent",
-    border: "1px solid #111",
-    color: "#000",
-    padding: "10px 14px",
-    borderRadius: 8,
+    color: "var(--tp-text-color)",
+    padding: "0 14px",
     cursor: "pointer",
     fontSize: 12,
-    letterSpacing: 1,
+    fontWeight: 800,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
     whiteSpace: "nowrap",
-    transition: "background 160ms ease, color 160ms ease, transform 120ms ease",
-
   },
-  navSearch: {
-    width: "min(520px, 100%)",
-    padding: "10px 78px 10px 14px",
-    borderRadius: 999,
-    border: "1px solid #cfcfcf",
-    fontSize: 13,
-    outline: "none",
-    background: "#fff",
-    color: "#000",
+  brand: {
+    fontSize: 34,
+    fontWeight: 900,
+    letterSpacing: 4,
+    opacity: 0.9,
   },
-  navClear: {
+  brandLogo: {
+    height: 100,
+    maxWidth: "min(68vw, 560px)",
+    width: "auto",
+    objectFit: "contain",
+  },
+  logoEditBtn: {
+    height: 40,
+    width: 40,
+    minWidth: 40,
+    borderRadius: 12,
+    border: "1px solid #66c7ff",
+    background: "rgba(24, 72, 102, 0.16)",
+    color: "#66c7ff",
+    padding: 0,
+    cursor: "pointer",
+  },
+  zoneEditBtn: {
     position: "absolute",
-    right: 6,
-    top: "50%",
-    transform: "translateY(-50%)",
-    padding: "8px 12px",
-    background: "#000",
-    border: "1px solid #000",
-    color: "#fff",
-    borderRadius: 999,
+    right: 8,
+    top: 10,
+    height: 40,
+    width: 40,
+    minWidth: 40,
+    borderRadius: 12,
+    border: "1px solid #66c7ff",
+    background: "rgba(24, 72, 102, 0.16)",
+    color: "#66c7ff",
+    padding: 0,
     cursor: "pointer",
-    fontSize: 12,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
   },
-
-  products: {
+  listScroll: {
+    overflowY: "auto",
+    WebkitOverflowScrolling: "touch",
+    position: "relative",
+    zIndex: 10,
+  },
+  mainZoneEditBtn: {
+    position: "absolute",
+    top: 12,
+    right: 8,
+    zIndex: 35,
+    height: 40,
+    width: 40,
+    minWidth: 40,
+    borderRadius: 12,
+    border: "1px solid #66c7ff",
+    background: "rgba(24, 72, 102, 0.16)",
+    color: "#66c7ff",
+    padding: 0,
+    cursor: "pointer",
+  },
+  productsLayout: {
+    width: "var(--tp-rail-width)",
+    margin: "0 auto",
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, 260px)",
-    justifyContent: "start",
-    gap: 24,
+    gap: 18,
+    alignItems: "start",
   },
-  card: {
-    borderRadius: 16,
-    border: "1px solid #333",
-    padding: 20,
-    background: "#0b0b0b",
+  filterPanel: {
+    position: "sticky",
+    top: 14,
+    marginTop: 16,
+    border: "1px solid var(--tp-border-color)",
+    borderRadius: 12,
+    padding: 12,
+    background: "var(--tp-control-bg-soft)",
+  },
+  createBtn: {
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: 1,
+    padding: "0 12px",
     cursor: "pointer",
-    boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
-    transition: "transform 180ms ease, box-shadow 180ms ease",
-
+    marginBottom: 10,
+    width: "100%",
   },
-  imageTile: {
-    borderRadius: 14,
-    border: "1px solid #333",
-    background: "#070707",
-    height: 150,
-    marginBottom: 14,
-  },
-  imageTileInner: {
-    height: "100%",
-    display: "flex",
+  mobileFilterFab: {
+    position: "fixed",
+    right: 20,
+    bottom: "calc(20px + env(safe-area-inset-bottom, 0px))",
+    zIndex: 60,
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg)",
+    color: "var(--tp-text-color)",
+    display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 14,
-    background:
-      "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01))",
-  },
-  imageTileLabel: { letterSpacing: 2, fontSize: 12, color: "#888" },
-  productName: { margin: "0 0 6px" },
-  size: { fontSize: 13, color: "#bbb", marginBottom: 6 },
-  note: { fontSize: 14, color: "#888", marginBottom: 12 },
-  price: { fontSize: 18, marginBottom: 12 },
-  qtyRow: { display: "flex", alignItems: "center", gap: 10 },
-  qtyBtn: {
-    borderRadius: 10,
-    width: 36,
-    height: 36,
-    background: "transparent",
-    color: "#fff",
-    border: "1px solid #555",
+    padding: 0,
     cursor: "pointer",
-    transition: "background 140ms ease, transform 120ms ease",
-
+    boxShadow: "0 6px 18px rgba(0,0,0,0.28)",
   },
-  qty: {
-    width: 30,
+  mobileFilterFabActive: {
+    border: "1px solid #66c7ff",
+    color: "#66c7ff",
+    background: "rgba(102,199,255,0.12)",
+  },
+  mobileFilterBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 999,
+    background: "#66c7ff",
+    color: "#ffffff",
+    border: "1px solid rgba(0,0,0,0.16)",
+    fontSize: 10,
+    fontWeight: 800,
+    lineHeight: "14px",
+    padding: "0 4px",
     textAlign: "center",
-    fontVariantNumeric: "tabular-nums",
   },
-  emptyHint: {
-    marginTop: 18,
-    color: "#777",
-    fontSize: 13,
-    letterSpacing: 0.2,
+  mobileFilterPanel: {
+    marginBottom: 10,
+    border: "1px solid var(--tp-border-color)",
+    borderRadius: 12,
+    padding: 12,
+    background: "var(--tp-control-bg-soft)",
   },
-
-  // Backdrop
-  backdrop: {
+  mobileFilterModalBackdrop: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0,0,0,0.62)",
-    transition: "opacity 200ms ease",
-    zIndex: 70,
-  },
-
-  // PRODUCT PANEL
-  productPanel: {
-    position: "fixed",
-    top: 132,
-    left: "50%",
-    height: "calc(100vh - 156px)",
-    width: "90vw",
-    maxWidth: 1200,
-    background: "#0b0b0b",
-    border: "1px solid #333",
-    borderRadius: 16,
-    zIndex: 80,
-    transition: "opacity 200ms ease, transform 220ms ease",
-    overflow: "hidden",
-    boxShadow: "0 30px 90px rgba(0,0,0,0.6)",
-  },
-  productPanelInner: {
-    height: "100%",
+    zIndex: 1000,
+    background: "rgba(135,135,135,0.94)",
     display: "flex",
-    flexDirection: "column",
+    alignItems: "flex-end",
+    justifyContent: "center",
+    padding: 10,
+    boxSizing: "border-box",
   },
-  productTopBand: {
-    height: 72,
-    borderBottom: "1px solid #222",
-    display: "flex",
-    alignItems: "center",
-    padding: "0 18px",
-  },
-  drawerBackBtnTop: {
+  mobileFilterModal: {
+    width: "min(520px, calc(100vw - 20px))",
+    maxHeight: "80vh",
+    overflowY: "auto",
+    border: "1px solid var(--tp-border-color)",
     borderRadius: 12,
-    background: "transparent",
-    border: "1px solid #555",
-    color: "#fff",
-    padding: "10px 14px",
-    cursor: "pointer",
-    fontSize: 12,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  drawerGrid: {
-    height: "100%",
-    display: "grid",
-    gridTemplateColumns: "1.1fr 0.9fr",
-  },
-  drawerLeft: { padding: 18, borderRight: "1px solid #222" },
-  drawerRight: { display: "flex", flexDirection: "column", minWidth: 0 },
-  drawerBody: { padding: 18, overflowY: "auto" },
-  drawerImage: {
-    border: "1px solid #333",
-    borderRadius: 14,
-    background: "#070707",
-    height: "100%",
-    minHeight: 420,
-  },
-  drawerImageInner: {
-    height: "100%",
-    display: "grid",
-    gridTemplateRows: "auto 1fr auto",
-    alignItems: "center",
-    justifyItems: "center",
-    borderRadius: 14,
-    background:
-      "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01))",
-  },
-  drawerImageLabel: { letterSpacing: 2, fontSize: 12, color: "#888" },
-  thumbRow: {
-    width: "100%",
-    display: "flex",
-    gap: 10,
     padding: 12,
-    justifyContent: "center",
-  },
-  thumb: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
-    border: "1px solid #333",
-    background: "#111",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 11,
-    color: "#777",
-    cursor: "pointer",
-  },
-  drawerName: { fontSize: 22, marginBottom: 6 },
-  drawerMeta: { color: "#bbb", fontSize: 13, marginBottom: 8 },
-  drawerNote: { color: "#888", marginBottom: 10 },
-  drawerPrice: { fontSize: 18, marginBottom: 14 },
-  drawerDesc: {
-    color: "#cfcfcf",
-    lineHeight: 1.55,
-    fontSize: 14,
-    borderTop: "1px solid #222",
-    paddingTop: 14,
-  },
-  drawerQtyRow: {
-    marginTop: 16,
-    display: "flex",
-    alignItems: "center",
+    background: "#d3d3d3",
+    display: "grid",
     gap: 10,
   },
-  drawerFooterHint: {
-    marginTop: 18,
-    color: "#777",
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
-
-  // CART PANEL
-  cartPanel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    height: "100vh",
-    width: "min(420px, 92vw)",
-    background: "#0b0b0b",
-    borderLeft: "1px solid #333",
-    zIndex: 90,
-    transition: "transform 220ms ease",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: "-20px 0 70px rgba(0,0,0,0.6)",
-    borderRadius: "16px 0 0 16px",
-  },
-  cartPanelHeader: {
-    padding: "16px 18px",
-    borderBottom: "1px solid #222",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  cartPanelTitle: {
-    fontSize: 14,
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    color: "#ddd",
-  },
-  closeBtn: {
-    background: "transparent",
-    border: "1px solid #555",
-    color: "#fff",
-    padding: "8px 10px",
+  mobileFilterCloseBtn: {
+    marginTop: 4,
+    height: 36,
     borderRadius: 8,
-    cursor: "pointer",
-  },
-  cartPanelBody: {
-    padding: 18,
-    overflowY: "auto",
-    flex: 1,
-  },
-  cartLine: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: "12px 0",
-    borderBottom: "1px solid #222",
-  },
-  cartLineName: { flex: 1, minWidth: 0 },
-  cartLineRight: {
-    display: "grid",
-    gridTemplateColumns: "28px 28px 28px 1fr",
-    alignItems: "center",
-    columnGap: 8,
-    width: 200,
-  },
-  qtyBtnSm: {
-    width: 28,
-    height: 28,
-    borderRadius: 999,
+    border: "1px solid var(--tp-border-color)",
     background: "transparent",
-    color: "#fff",
-    border: "1px solid #555",
-    cursor: "pointer",
-  },
-  qtySm: {
-    width: 28,
-    textAlign: "center",
-    fontVariantNumeric: "tabular-nums",
-    color: "#fff",
-  },
-  cartLineTotal: {
-    justifySelf: "end",
-    textAlign: "right",
-    width: "100%",
-    fontVariantNumeric: "tabular-nums",
-    color: "#fff",
-  },
-  cartPanelTotalRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 18,
-    paddingTop: 12,
-    borderTop: "1px solid #222",
-    fontSize: 16,
-  },
-  cartPanelTotalValue: {
-    fontVariantNumeric: "tabular-nums",
-    fontWeight: "bold",
-  },
-  confirmBtnWide: {
-    marginTop: 16,
-    width: "100%",
-    padding: "14px 16px",
-    background: "#fff",
-    color: "#000",
-    border: "none",
-    fontWeight: "bold",
-    letterSpacing: 1,
-    cursor: "pointer",
-    borderRadius: 999,
-  },
-  cartPanelFootnote: {
-    marginTop: 12,
-    color: "#777",
-    fontSize: 12,
-    letterSpacing: 0.3,
-    lineHeight: 1.4,
-  },
-
-  // CHECKOUT PANEL
-  checkoutPanel: {
-    position: "fixed",
-    left: 0,
-    right: 0,
-    top: 132,
-    height: "calc(100vh - 132px)",
-    background: "#050505",
-    borderTop: "1px solid #222",
-    zIndex: 95,
-    boxShadow: "0 -10px 60px rgba(0,0,0,0.7)",
-    transition: "opacity 180ms ease, transform 180ms ease",
-    overflow: "hidden",
-  },
-  checkoutHeader: {
-    height: 78,
-    padding: "0 20px",
-    borderBottom: "1px solid #222",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    background:
-      "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))",
-  },
-  checkoutHeaderLeft: { display: "flex", gap: 14, alignItems: "center" },
-  checkoutHeaderRight: { display: "flex", alignItems: "center" },
-  checkoutBackBtn: {
-    borderRadius: 12,
-    background: "transparent",
-    border: "1px solid #555",
-    color: "#fff",
-    padding: "10px 14px",
-    cursor: "pointer",
-    fontSize: 12,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  checkoutTitle: { fontSize: 16, letterSpacing: 2, textTransform: "uppercase" },
-  checkoutSub: { color: "#aaa", fontSize: 12, marginTop: 4 },
-  checkoutOrderId: {
-    color: "#bbb",
-    fontSize: 12,
-    letterSpacing: 1,
-    fontVariantNumeric: "tabular-nums",
-  },
-  checkoutBody: {
-    height: "calc(100% - 78px)",
-    overflowY: "auto",
-    padding: 20,
-  },
-  checkoutGrid: {
-    maxWidth: 1100,
-    margin: "0 auto",
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 20,
-  },
-  checkoutLeft: {
-    border: "1px solid #222",
-    borderRadius: 16,
-    background: "#0b0b0b",
-    padding: 18,
-    boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
-  },
-  checkoutRight: {
-    border: "1px solid #222",
-    borderRadius: 16,
-    background: "#0b0b0b",
-    padding: 18,
-    boxShadow: "0 18px 60px rgba(0,0,0,0.35)",
-  },
-  sectionTitle: {
+    color: "var(--tp-text-color)",
     fontSize: 13,
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    color: "#ddd",
-    marginBottom: 12,
+    fontWeight: 800,
+    letterSpacing: 1,
+    cursor: "pointer",
   },
-  fieldGrid: { display: "grid", gap: 12, marginBottom: 18 },
-  fieldLabel: { display: "grid", gap: 6, color: "#bbb", fontSize: 12 },
-  input: {
-    borderRadius: 12,
-    border: "1px solid #333",
-    background: "#070707",
-    color: "#fff",
-    padding: "10px 12px",
-    outline: "none",
-    fontFamily: "inherit",
+  filterTitle: {
     fontSize: 14,
+    fontWeight: 900,
+    letterSpacing: 1.1,
+    marginBottom: 20,
   },
-  proofRow: { display: "flex", gap: 10, alignItems: "center" },
-  uploadBtn: {
-    borderRadius: 999,
-    padding: "12px 14px",
-    border: "1px solid #555",
+  filterActions: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 20,
+  },
+  filterActionBtn: {
+    height: 28,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
     background: "transparent",
-    color: "#fff",
+    color: "var(--tp-text-color)",
+    fontSize: 14,
+    padding: "0 8px",
     cursor: "pointer",
-    fontWeight: "bold",
-    letterSpacing: 0.6,
   },
-  secondaryBtn: {
-    borderRadius: 999,
-    padding: "12px 14px",
-    border: "1px solid #333",
-    background: "#111",
-    color: "#ddd",
+  filterList: {
+    display: "grid",
+    gap: 8,
+  },
+  filterItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 15,
+    minHeight: 24,
     cursor: "pointer",
-    fontWeight: "bold",
   },
-  proofPreview: {
-    marginTop: 12,
-    borderRadius: 14,
-    border: "1px solid #222",
-    overflow: "hidden",
-    background: "#060606",
+  gridWrap: {
+    minWidth: 0,
+    padding: "0 10px",
+    boxSizing: "border-box",
   },
-  proofImg: { width: "100%", height: 260, objectFit: "cover", display: "block" },
-  proofHint: {
-    marginTop: 12,
-    color: "#777",
-    fontSize: 13,
-    lineHeight: 1.5,
-  },
-  checkoutActions: { marginTop: 16 },
-  sendBtn: {
-    width: "100%",
-    padding: "14px 16px",
-    borderRadius: 999,
-    border: "none",
-    background: "#fff",
-    color: "#000",
-    fontWeight: "bold",
-    letterSpacing: 1,
-  },
-  validationHint: { marginTop: 10, color: "#777", fontSize: 12 },
-
-  summaryCard: {
-    borderRadius: 14,
-    border: "1px solid #222",
-    background: "#070707",
-    overflow: "hidden",
-  },
-  summaryLine: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    padding: "12px 14px",
-    borderBottom: "1px solid #1c1c1c",
-  },
-  summaryLineLeft: { minWidth: 0 },
-  summaryLineRight: {
-    textAlign: "right",
-    fontVariantNumeric: "tabular-nums",
-    color: "#fff",
-    whiteSpace: "nowrap",
-  },
-  summaryTotalRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "12px 14px",
-  },
-  summaryTotalValue: { fontWeight: "bold", fontVariantNumeric: "tabular-nums" },
-
-  qrCard: {
-    marginTop: 8,
-    borderRadius: 14,
-    border: "1px solid #222",
-    background: "#070707",
-    padding: 14,
-    display: "grid",
-    gridTemplateColumns: "180px 1fr",
-    gap: 14,
-    alignItems: "center",
-  },
-  qrTile: {
-    width: 180,
-    height: 180,
-    borderRadius: 14,
-    background: "#fff",
-    display: "grid",
-    placeItems: "center",
-  },
-  qrText: { color: "#ddd" },
-  qrTitle: { fontSize: 16, letterSpacing: 1, marginBottom: 6 },
-  qrSub: { color: "#aaa", fontSize: 13, lineHeight: 1.5 },
-  qrMeta: { marginTop: 12, color: "#ddd", fontSize: 13 },
-  qrHint: { marginTop: 10, color: "#777", fontSize: 12 },
-
-  successWrap: {
-    maxWidth: 720,
+  emptyHint: {
+    width: "min(1200px, 96vw)",
     margin: "0 auto",
-    padding: "36px 20px",
-    textAlign: "center",
+    opacity: 0.7,
+    paddingBottom: 40,
   },
-  successBadge: {
-    display: "inline-block",
-    padding: "8px 12px",
-    borderRadius: 999,
-    border: "1px solid #333",
-    color: "#ddd",
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    fontSize: 12,
-  },
-  successTitle: { fontSize: 34, marginTop: 18 },
-  successText: { color: "#aaa", marginTop: 8, lineHeight: 1.6 },
-  successCard: {
-    marginTop: 18,
-    borderRadius: 16,
-    border: "1px solid #222",
-    background: "#0b0b0b",
-    padding: 16,
-  },
-  successBtn: {
-    marginTop: 18,
-    padding: "14px 18px",
-    borderRadius: 999,
-    border: "none",
-    background: "#fff",
-    color: "#000",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-
-  
 };

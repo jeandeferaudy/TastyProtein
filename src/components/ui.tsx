@@ -1,0 +1,126 @@
+// src/components/ui.tsx
+"use client";
+
+import * as React from "react";
+
+export const UI = {
+  // Primary dark button style (matches cart Checkout button)
+  btn: {
+    borderRadius: 14,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg)",
+    color: "var(--tp-text-color)",
+    padding: "12px 14px",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 900 as const,
+    letterSpacing: 0.1,
+    display: "inline-flex",
+    justifyContent: "center",
+    alignItems: "center",
+    userSelect: "none" as const,
+    WebkitTapHighlightColor: "transparent",
+  },
+
+  // Compact dark button for +/- and compact controls
+  btnGhost: {
+    borderRadius: 10,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    padding: "8px 10px",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 900 as const,
+    letterSpacing: 0.1,
+    display: "inline-flex",
+    justifyContent: "center",
+    alignItems: "center",
+    userSelect: "none" as const,
+    WebkitTapHighlightColor: "transparent",
+  },
+
+  // Inverted button style for light backgrounds (navbar)
+  btnNav: {
+    borderRadius: 8,
+    border: "1px solid var(--tp-nav-fg)",
+    background: "transparent",
+    color: "var(--tp-nav-fg)",
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 700 as const,
+    letterSpacing: 1,
+    textTransform: "uppercase" as const,
+    whiteSpace: "nowrap" as const,
+    display: "inline-flex",
+    justifyContent: "center",
+    alignItems: "center",
+    userSelect: "none" as const,
+    WebkitTapHighlightColor: "transparent",
+  },
+
+  btnDisabled: {
+    opacity: 0.5,
+    cursor: "not-allowed",
+  },
+};
+
+type AppButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "solid" | "ghost" | "nav";
+};
+
+export function AppButton({
+  variant = "solid",
+  disabled,
+  style,
+  ...props
+}: AppButtonProps) {
+  const base =
+    variant === "ghost" ? UI.btnGhost : variant === "nav" ? UI.btnNav : UI.btn;
+
+  return (
+    <button
+      {...props}
+      disabled={disabled}
+      type={props.type ?? "button"}
+      style={{
+        ...base,
+        ...(disabled ? UI.btnDisabled : null),
+        ...(style ?? null),
+      }}
+    />
+  );
+}
+
+type PenIconProps = {
+  size?: number;
+};
+
+export function PenIcon({ size = 16 }: PenIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+      <path
+        d="M4 20h3.7l10-10-3.7-3.7-10 10V20Zm12.6-12.6 1.2-1.2a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2l-1.2 1.2-3-3Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+type GearIconProps = {
+  size?: number;
+};
+
+export function GearIcon({ size = 16 }: GearIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="9" cy="7" r="2.2" fill="currentColor" />
+      <circle cx="15" cy="12" r="2.2" fill="currentColor" />
+      <circle cx="11" cy="17" r="2.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+export default AppButton;

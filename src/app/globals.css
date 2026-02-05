@@ -1,6 +1,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --tp-rail-width: min(80vw, 1440px);
+  --tp-text-color: #ffffff;
+  --tp-border-color: rgba(255, 255, 255, 0.2);
+  --tp-border-color-soft: rgba(255, 255, 255, 0.14);
+  --tp-control-bg: rgba(255, 255, 255, 0.08);
+  --tp-control-bg-soft: rgba(255, 255, 255, 0.06);
+  --tp-surface-bg: rgba(20, 20, 20, 0.55);
+  --tp-nav-fg: #111111;
+  --tp-nav-inverse: #ffffff;
+  --tp-cta-bg: #ffffff;
+  --tp-cta-fg: #000000;
+  --tp-cta-border: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -8,6 +20,28 @@
     --background: #0a0a0a;
     --foreground: #ededed;
   }
+}
+
+[data-tp-mode="light"] {
+  --tp-text-color: #111111;
+  --tp-border-color: rgba(17, 17, 17, 0.24);
+  --tp-border-color-soft: rgba(17, 17, 17, 0.16);
+  --tp-control-bg: rgba(0, 0, 0, 0.06);
+  --tp-control-bg-soft: rgba(0, 0, 0, 0.045);
+  --tp-surface-bg: rgba(255, 255, 255, 0.68);
+  --tp-nav-fg: #111111;
+  --tp-nav-inverse: #ffffff;
+  --tp-cta-bg: #000000;
+  --tp-cta-fg: #ffffff;
+  --tp-cta-border: #000000;
+}
+
+[data-tp-mode="dark"] {
+  --tp-nav-fg: #ffffff;
+  --tp-nav-inverse: #000000;
+  --tp-cta-bg: #ffffff;
+  --tp-cta-fg: #000000;
+  --tp-cta-border: #ffffff;
 }
 
 html,
@@ -35,8 +69,55 @@ a {
   text-decoration: none;
 }
 
+/* Shared content width for navbar controls and product grid */
+.tp-content-rail {
+  width: var(--tp-rail-width);
+  margin-inline: auto;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --tp-rail-width: calc(100vw - 20px);
+  }
+
+  .tp-content-rail {
+    width: 100%;
+    padding-inline: 10px;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
   }
+}
+
+@keyframes tpDrawerSlideUp {
+  from {
+    transform: translate(-50%, 16px);
+  }
+  to {
+    transform: translate(-50%, 0);
+  }
+}
+
+.tp-drawer-slide-up {
+  animation: tpDrawerSlideUp 220ms ease-out both;
+  will-change: transform;
+}
+
+@keyframes tpSheetSlideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.tp-sheet-slide-up {
+  animation: tpSheetSlideUp 220ms ease-out both;
+  will-change: transform, opacity;
 }
