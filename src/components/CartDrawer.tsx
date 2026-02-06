@@ -45,8 +45,8 @@ export default function CartDrawer({
     >
       <div style={styles.header}>
         <div style={styles.title}>Your Cart</div>
-        <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button">
-          CLOSE
+        <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button" aria-label="Close">
+          X
         </AppButton>
       </div>
 
@@ -78,9 +78,11 @@ export default function CartDrawer({
               <div style={styles.left}>
                 <div style={styles.name}>{i.name ?? "Unnamed product"}</div>
                 <div style={styles.meta}>
-                  {[i.size, i.temperature].filter(Boolean).join(" • ") || "—"}
+                  {[i.country, i.temperature].filter(Boolean).join(" • ") || "—"}
                 </div>
-                <div style={styles.perPiece}>₱ {formatMoney(i.price)} / pc</div>
+                <div style={styles.perPiece}>
+                  ₱ {formatMoney(i.price)} / {i.size || "pc"}
+                </div>
               </div>
 
               <div style={styles.right}>
@@ -99,7 +101,14 @@ export default function CartDrawer({
                     <span style={styles.pmGlyph}>−</span>
                   </AppButton>
 
-                  <div style={styles.qty}>{i.qty}</div>
+                  <div
+                    style={{
+                      ...styles.qty,
+                      color: i.qty > 0 ? "var(--tp-accent)" : styles.qty.color,
+                    }}
+                  >
+                    {i.qty}
+                  </div>
 
                   <AppButton
                     variant="ghost"
@@ -151,7 +160,7 @@ const styles: Record<string, React.CSSProperties> = {
     // ✅ IMPORTANT: fully opaque panel (removes “faded” look)
     background: "transparent",
 
-    borderLeft: "1px solid rgba(255,255,255,0.12)",
+    borderLeft: "none",
     transition: "transform 220ms ease",
     zIndex: 1400,
     display: "flex",

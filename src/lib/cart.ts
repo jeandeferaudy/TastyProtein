@@ -3,6 +3,8 @@
 export type CartItem = {
   productId: string;
   name: string;
+  country?: string | null;
+  type?: string | null;
   size: string | null;
   temperature?: string | null;
   thumbnailUrl?: string | null;
@@ -19,6 +21,8 @@ export function buildCartItems(rows: any[]): CartItem[] {
   return safeRows.map((r) => ({
     productId: String(r.product_id ?? r.productId ?? ""),
     name: String(r.name ?? ""),
+    country: r.country ?? r.country_of_origin ?? null,
+    type: r.type ?? null,
     size: r.size ?? null,
     temperature: r.temperature ?? null,
     thumbnailUrl: r.thumbnail_url ?? r.thumbnailUrl ?? null,

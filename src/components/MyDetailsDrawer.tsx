@@ -311,7 +311,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "fixed",
     left: 0,
     right: 0,
-    background: "black",
+    background: "transparent",
     zIndex: 860,
   },
   panel: {
@@ -319,10 +319,12 @@ const styles: Record<string, React.CSSProperties> = {
     left: "50%",
     transform: "translateX(-50%)",
     width: "var(--tp-rail-width)",
-    background: "black",
+    background: "transparent",
     zIndex: 910,
     display: "flex",
     flexDirection: "column",
+    boxShadow: "none",
+    border: "none",
   },
   topRow: {
     minHeight: 64,

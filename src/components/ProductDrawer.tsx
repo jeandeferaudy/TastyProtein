@@ -31,15 +31,8 @@ function formatSizeG(size_g?: number | null) {
   return `${size_g}g`;
 }
 
-function metaLine(p: Product) {
-  const bits = [
-    p.type ?? "",
-    p.temperature ?? "",
-    formatSizeG(p.size_g),
-    p.country_of_origin ?? "",
-  ].filter(Boolean);
-
-  return bits.join(" • ");
+function formatSize(p: Product) {
+  return p.size?.trim() || formatSizeG(p.size_g) || "";
 }
 
 export default function ProductDrawer({
@@ -204,19 +197,52 @@ export default function ProductDrawer({
                   }}
                 >
                 <div style={styles.drawerName}>{product.long_name || product.name}</div>
-                <div style={styles.drawerMeta}>{metaLine(product)}</div>
 
-                <div style={styles.drawerPrice}>
-                  ₱ {formatMoney(product.selling_price)}
+                <div style={styles.drawerDetailStack}>
+                  {product.country_of_origin ? (
+                    <div style={styles.detailRow}>
+                      <div style={styles.detailLabel}>Country of Origin</div>
+                      <div style={styles.detailValue}>{product.country_of_origin}</div>
+                    </div>
+                  ) : null}
+
+                  {product.cut ? (
+                    <div style={styles.detailRow}>
+                      <div style={styles.detailLabel}>Cut</div>
+                      <div style={styles.detailValue}>{product.cut}</div>
+                    </div>
+                  ) : null}
+
+                  {product.state ? (
+                    <div style={styles.detailRow}>
+                      <div style={styles.detailLabel}>State</div>
+                      <div style={styles.detailValue}>{product.state}</div>
+                    </div>
+                  ) : null}
                 </div>
 
-                {product.description ? (
-                  <div style={styles.drawerDesc}>{product.description}</div>
-                ) : (
-                  <div style={styles.drawerDescMuted}>
-                    No description yet.
+                {product.temperature ? (
+                  <div style={styles.detailBlock}>
+                    <div style={styles.detailLabel}>Temperature</div>
+                    <div style={styles.detailValue}>{product.temperature}</div>
                   </div>
-                )}
+                ) : null}
+
+                <div style={styles.detailBlock}>
+                  <div style={styles.detailLabel}>Description</div>
+                  {product.description ? (
+                    <div style={styles.drawerDesc}>{product.description}</div>
+                  ) : (
+                    <div style={styles.drawerDescMuted}>No description yet.</div>
+                  )}
+                </div>
+
+                <div style={styles.drawerPriceRow}>
+                  <div style={styles.drawerPrice}>₱ {formatMoney(product.selling_price)}</div>
+                  {formatSize(product) ? (
+                    <div style={styles.drawerFormat}>{formatSize(product)}</div>
+                  ) : null}
+                </div>
 
                 <div style={styles.drawerQtyRow}>
                   <AppButton
@@ -241,7 +267,7 @@ export default function ProductDrawer({
                 </div>
 
                 <div style={styles.drawerFooterHint}>
-                  Delivered chilled • Vacuum packed • Prepared with care
+                  Prepared and delivered with care, with direct delivery to your door. You can add a thermal bag during checkout for better temperature preservation.
                 </div>
               </div>
             </div>
@@ -258,7 +284,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "fixed",
     left: 0,
     right: 0,
-    background: "black",
+    background: "transparent",
     zIndex: 850,
   },
   productPanel: {
@@ -266,7 +292,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: "50%",
     transform: "translateX(-50%)",
     width: "var(--tp-rail-width)",
-    background: "black",
+    background: "transparent",
     borderRadius: 0,
     zIndex: 900,
     overflow: "hidden",
@@ -351,8 +377,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   drawerImage: {
-    border: "1px solid var(--tp-border-color-soft)",
-    borderRadius: 14,
+    border: "none",
+    borderRadius: 0,
     background: "transparent",
     minHeight: 0,
     height: "100%",
@@ -364,7 +390,7 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateRows: "auto 1fr auto",
     alignItems: "stretch",
     justifyItems: "center",
-    borderRadius: 14,
+    borderRadius: 0,
     background: "transparent",
   },
   drawerImageLogo: {
@@ -380,7 +406,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: "100%",
     objectFit: "cover",
-    borderRadius: 14,
+    borderRadius: 0,
   },
   thumbRow: {
     width: "calc(100% - 24px)",
@@ -394,8 +420,8 @@ const styles: Record<string, React.CSSProperties> = {
   thumb: {
     width: 70,
     height: 70,
-    borderRadius: 10,
-    border: "1px solid var(--tp-border-color)",
+    borderRadius: 0,
+    border: "none",
     background: "var(--tp-control-bg-soft)",
     display: "flex",
     alignItems: "center",
@@ -406,38 +432,66 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
     padding: 0,
   },
-  thumbActive: {
-    border: "1px solid var(--tp-border-color)",
-  },
+  thumbActive: {},
   thumbImg: {
     width: "100%",
     height: "100%",
     objectFit: "cover",
   },
 
-  drawerName: { fontSize: 22, marginBottom: 8, color: "var(--tp-text-color)" },
-  drawerMeta: { color: "var(--tp-text-color)", opacity: 0.72, fontSize: 13, marginBottom: 12 },
-  drawerPrice: { fontSize: 18, marginBottom: 14, color: "var(--tp-text-color)" },
+  drawerName: { fontSize: 24, marginBottom: 0, color: "var(--tp-text-color)" },
+  drawerDetailStack: {
+    marginTop: 50,
+    display: "grid",
+    gap: 8,
+  },
+  detailBlock: {
+    marginTop: 30,
+    display: "grid",
+    gap: 8,
+  },
+  detailRow: {
+    display: "grid",
+    gap: 6,
+  },
+  detailLabel: {
+    fontSize: 13,
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+    opacity: 0.7,
+  },
+  detailValue: {
+    fontSize: 16,
+    color: "var(--tp-text-color)",
+  },
+  drawerPriceRow: {
+    marginTop: 24,
+    display: "flex",
+    alignItems: "baseline",
+    gap: 14,
+  },
+  drawerPrice: { fontSize: 18, color: "var(--tp-text-color)" },
+  drawerFormat: { fontSize: 14, opacity: 0.8 },
 
   drawerDesc: {
     color: "var(--tp-text-color)",
     opacity: 0.84,
     lineHeight: 1.55,
     fontSize: 14,
-    borderTop: "1px solid var(--tp-border-color-soft)",
-    paddingTop: 14,
+    borderTop: "none",
+    paddingTop: 0,
   },
   drawerDescMuted: {
     color: "var(--tp-text-color)",
     opacity: 0.58,
     lineHeight: 1.55,
     fontSize: 14,
-    borderTop: "1px solid var(--tp-border-color-soft)",
-    paddingTop: 14,
+    borderTop: "none",
+    paddingTop: 0,
   },
 
   drawerQtyRow: {
-    marginTop: 16,
+    marginTop: 14,
     display: "flex",
     alignItems: "center",
     gap: 10,

@@ -472,7 +472,7 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "44px 1fr 44px",
     gap: 10,
     alignItems: "center",
-    borderTop: "1px solid var(--tp-border-color-soft)",
+    borderTop: "none",
   },
   adminRow: {
     padding: "0 12px 10px",

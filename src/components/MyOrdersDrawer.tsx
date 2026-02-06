@@ -148,16 +148,18 @@ export default function MyOrdersDrawer({
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  backdrop: { position: "fixed", left: 0, right: 0, background: "black", zIndex: 860 },
+  backdrop: { position: "fixed", left: 0, right: 0, background: "transparent", zIndex: 860 },
   panel: {
     position: "fixed",
     left: "50%",
     transform: "translateX(-50%)",
     width: "var(--tp-rail-width)",
-    background: "black",
+    background: "transparent",
     zIndex: 910,
     display: "flex",
     flexDirection: "column",
+    boxShadow: "none",
+    border: "none",
   },
   topRow: { minHeight: 64, display: "flex", alignItems: "center", gap: 40, padding: "18px 0 12px" },
   backBtn: { width: 68, minWidth: 68, height: 36, padding: 0, borderRadius: 8, fontSize: 13, fontWeight: 700, letterSpacing: 1 },

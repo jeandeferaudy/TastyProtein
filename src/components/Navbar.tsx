@@ -100,7 +100,7 @@ export default function Navbar({
       : ({ "--tp-nav-fg": "#111111", "--tp-nav-inverse": "#ffffff" } as React.CSSProperties);
 
   return (
-    <nav style={{ ...styles.navbar, ...navVars, ...(zoneStyle ?? null) }}>
+    <nav className="tp-navbar" style={{ ...styles.navbar, ...navVars, ...(zoneStyle ?? null) }}>
       <div
         className="tp-content-rail"
         style={{ ...styles.navInner, ...(isMobile ? styles.navInnerMobile : null) }}
@@ -121,39 +121,238 @@ export default function Navbar({
             Shop
           </AppButton>
 
-          {authLabel ? (
-            <div
-              ref={authWrapRef}
-              style={{
-                ...styles.authWrap,
-                ...(searchStartOffset > 0 ? styles.authWrapDesktop : null),
-              }}
-            >
-              <AppButton
-                variant="nav"
+          {!isMobile && (
+            <div style={styles.viewToggleWrapLeft}>
+              <div style={{ ...styles.viewToggle, ...(isMobile ? styles.viewToggleMobile : null) }}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.viewBtn,
+                    ...(isMobile ? styles.viewBtnMobile : null),
+                    ...(gridView === "list" ? styles.viewBtnActive : null),
+                  }}
+                  onClick={() => onChangeGridView("list")}
+                  aria-label="List view"
+                  title="List view"
+                >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  aria-hidden="true"
+                  style={{ display: "block", transform: "translate(2px, -1px)" }}
+                >
+                  <path
+                    d="M5 6h14M5 12h14M5 18h14"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
                 style={{
-                  ...styles.navBtn,
-                  ...(isMobile ? styles.navBtnMobile : null),
-                  ...styles.userBtnBase,
+                  ...styles.viewBtn,
+                  ...(isMobile ? styles.viewBtnMobile : null),
+                  ...(gridView === "4" ? styles.viewBtnActive : null),
+                }}
+                onClick={() => onChangeGridView("4")}
+                aria-label="3-up grid view"
+                title="3-up grid view"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  aria-hidden="true"
+                  style={{ display: "block", transform: "translateY(-1px)" }}
+                >
+                  <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                  <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                  <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                  <rect x="13" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.viewBtn,
+                  ...(isMobile ? styles.viewBtnMobile : null),
+                  ...styles.viewBtnLast,
+                  ...(gridView === "6" ? styles.viewBtnActive : null),
+                }}
+                onClick={() => onChangeGridView("6")}
+                aria-label="6-up grid view"
+                title="6-up grid view"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="24"
+                  height="24"
+                  aria-hidden="true"
+                  style={{ display: "block", transform: "translate(-2px, -1px)" }}
+                >
+                  <rect x="4.5" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="10.1" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="15.7" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="4.5" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="10.1" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="15.7" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="4.5" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="10.1" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  <rect x="15.7" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                </svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ ...styles.navCenter, ...(isMobile ? styles.navCenterMobile : null) }}>
+          <div style={{ ...styles.navSearchWrap, ...(isMobile ? styles.navSearchWrapMobile : null) }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style={styles.navSearchIcon}>
+              <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" fill="none" />
+              <path d="M16.5 16.5L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <input
+              className="tp-nav-search"
+              style={{ ...styles.navSearchInput, ...(isMobile ? styles.navSearchMobile : null) }}
+              placeholder="Search here"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search products"
+            />
+          </div>
+          {search.trim().length > 0 && (
+            <AppButton
+              variant="nav"
+              style={styles.navClear}
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </AppButton>
+          )}
+        </div>
+
+        <div style={{ ...styles.navRight, ...(isMobile ? styles.navRightMobile : null) }}>
+          {isMobile ? (
+            <div style={styles.viewToggleWrapMobile}>
+              <div style={{ ...styles.viewToggle, ...(isMobile ? styles.viewToggleMobile : null) }}>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.viewBtn,
+                    ...(isMobile ? styles.viewBtnMobile : null),
+                    ...(gridView === "list" ? styles.viewBtnActive : null),
+                  }}
+                  onClick={() => onChangeGridView("list")}
+                  aria-label="List view"
+                  title="List view"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    aria-hidden="true"
+                    style={{ display: "block", transform: "translate(2px, -1px)" }}
+                  >
+                    <path
+                      d="M5 6h14M5 12h14M5 18h14"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.viewBtn,
+                    ...(isMobile ? styles.viewBtnMobile : null),
+                    ...(gridView === "4" ? styles.viewBtnActive : null),
+                  }}
+                  onClick={() => onChangeGridView("4")}
+                  aria-label="3-up grid view"
+                  title="3-up grid view"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    aria-hidden="true"
+                    style={{ display: "block", transform: "translateY(-1px)" }}
+                  >
+                    <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                    <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                    <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                    <rect x="13" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...styles.viewBtn,
+                    ...(isMobile ? styles.viewBtnMobile : null),
+                    ...styles.viewBtnLast,
+                    ...(gridView === "6" ? styles.viewBtnActive : null),
+                  }}
+                  onClick={() => onChangeGridView("6")}
+                  aria-label="6-up grid view"
+                  title="6-up grid view"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="24"
+                    height="24"
+                    aria-hidden="true"
+                    style={{ display: "block", transform: "translate(-2px, -1px)" }}
+                  >
+                    <rect x="4.5" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="10.1" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="15.7" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="4.5" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="10.1" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="15.7" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="4.5" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="10.1" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                    <rect x="15.7" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {authLabel ? (
+            <div ref={authWrapRef} style={styles.authWrap}>
+              <button
+                type="button"
+                style={{
+                  ...styles.userCircleBtn,
                   ...(editMode ? styles.userBtnEditMode : null),
-                  ...(searchStartOffset > 0 ? styles.userBtnDesktop : null),
                 }}
                 onClick={() => setAuthMenuOpen((v) => !v)}
                 aria-label="Account menu"
               >
-                <span style={styles.userPill}>
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                {authInitial ? (
+                  <span style={styles.userInitial}>{authInitial}</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
                     <path
                       d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.3 0-6 2.1-6 4.7V20h12v-1.3c0-2.6-2.7-4.7-6-4.7Z"
                       fill="currentColor"
                     />
                   </svg>
-                  <span>{authInitial}</span>
-                </span>
-                {searchStartOffset > 0 ? (
-                  <span style={styles.userName}>{authDisplayName}</span>
-                ) : null}
-              </AppButton>
+                )}
+              </button>
               {authMenuOpen && (
                 <div style={styles.authMenu}>
                   <button
@@ -238,121 +437,6 @@ export default function Navbar({
               Login
             </AppButton>
           )}
-        </div>
-
-        <div style={{ ...styles.navCenter, ...(isMobile ? styles.navCenterMobile : null) }}>
-          <input
-            style={{ ...styles.navSearch, ...(isMobile ? styles.navSearchMobile : null) }}
-            placeholder="Search here"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search products"
-          />
-          {search.trim().length > 0 && (
-            <AppButton
-              variant="nav"
-              style={styles.navClear}
-              onClick={() => setSearch("")}
-              aria-label="Clear search"
-              title="Clear search"
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M6 6l12 12M18 6L6 18"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </AppButton>
-          )}
-        </div>
-
-        <div style={{ ...styles.navRight, ...(isMobile ? styles.navRightMobile : null) }}>
-          <div style={{ ...(isMobile ? styles.viewToggleWrapMobile : null) }}>
-            <div style={{ ...styles.viewToggle, ...(isMobile ? styles.viewToggleMobile : null) }}>
-            <button
-              type="button"
-              style={{
-                ...styles.viewBtn,
-                ...(isMobile ? styles.viewBtnMobile : null),
-                ...(gridView === "list" ? styles.viewBtnActive : null),
-              }}
-              onClick={() => onChangeGridView("list")}
-              aria-label="List view"
-              title="List view"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                aria-hidden="true"
-                style={{ display: "block", transform: "translate(2px, -1px)" }}
-              >
-                <path
-                  d="M5 6h14M5 12h14M5 18h14"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              style={{
-                ...styles.viewBtn,
-                ...(isMobile ? styles.viewBtnMobile : null),
-                ...(gridView === "4" ? styles.viewBtnActive : null),
-              }}
-              onClick={() => onChangeGridView("4")}
-              aria-label="3-up grid view"
-              title="3-up grid view"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                aria-hidden="true"
-                style={{ display: "block", transform: "translateY(-1px)" }}
-              >
-                <rect x="4.5" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
-                <rect x="13" y="4.5" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
-                <rect x="4.5" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
-                <rect x="13" y="13" width="6.5" height="6.5" rx="1.6" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              style={{
-                ...styles.viewBtn,
-                ...(isMobile ? styles.viewBtnMobile : null),
-                ...styles.viewBtnLast,
-                ...(gridView === "6" ? styles.viewBtnActive : null),
-              }}
-              onClick={() => onChangeGridView("6")}
-              aria-label="6-up grid view"
-              title="6-up grid view"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                aria-hidden="true"
-                style={{ display: "block", transform: "translate(-2px, -1px)" }}
-              >
-                <rect x="4.5" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="10.1" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="15.7" y="4.5" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="4.5" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="10.1" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="15.7" y="10.1" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="4.5" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="10.1" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-                <rect x="15.7" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
-              </svg>
-            </button>
-            </div>
-          </div>
           <div style={{ ...(isMobile ? styles.cartWrapMobile : null) }}>
             <AppButton
               variant="nav"
@@ -364,8 +448,8 @@ export default function Navbar({
               onClick={onOpenCart}
             >
               {isMobile
-                ? `Cart (₱ ${Math.round(Number(subtotal || 0)).toLocaleString("en-PH")})`
-                : `Cart (${totalUnits}) (₱ ${formatMoney(subtotal)})`}
+                ? `CART - ₱ ${Math.round(Number(subtotal || 0)).toLocaleString("en-PH")}`
+                : `CART - ₱ ${formatMoney(subtotal)}`}
             </AppButton>
           </div>
         </div>
@@ -391,14 +475,14 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1200,
     width: "100vw",
     marginLeft: "calc(50% - 50vw)",
-    background: "#fff",
+    background: "transparent",
     color: "#000",
     borderTop: "none",
-    borderBottom: "none",
+    borderBottom: "2px solid transparent",
   },
   navInner: {
     margin: "0 auto",
-    padding: "9.5px 0",
+    padding: "4.5px 0",
     display: "grid",
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
@@ -439,6 +523,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 14px",
     borderRadius: 8,
     fontWeight: 700,
+    fontSize: 16,
+    border: "1px solid transparent",
+    background: "transparent",
   },
   navBtnMobile: {
     height: 40,
@@ -467,6 +554,10 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-end",
     alignItems: "center",
   },
+  viewToggleWrapLeft: {
+    display: "flex",
+    alignItems: "center",
+  },
   navEditBtn: {
     width: NAV_CONTROL_H,
     minWidth: NAV_CONTROL_H,
@@ -482,41 +573,26 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translateY(-50%)",
     zIndex: 1210,
   },
-  userPill: {
+  userCircleBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: "999px",
+    border: "1px solid var(--tp-nav-fg)",
     display: "inline-flex",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    color: "var(--tp-nav-fg)",
+    background: "transparent",
+    cursor: "pointer",
+    padding: 0,
+  },
+  userInitial: {
+    fontSize: 12,
     fontWeight: 800,
-    minWidth: 20,
   },
   authWrap: {
     position: "relative",
     zIndex: 1250,
-  },
-  authWrapDesktop: {
-    minWidth: 168,
-  },
-  userBtnDesktop: {
-    width: 168,
-    height: NAV_CONTROL_H,
-    justifyContent: "flex-start",
-    gap: 8,
-    fontSize: 14,
-    padding: "0 14px",
-    borderColor: "var(--tp-nav-fg)",
-    color: "var(--tp-nav-fg)",
-    background: "transparent",
-  },
-  userBtnBase: {
-    borderColor: "var(--tp-nav-fg)",
-    color: "var(--tp-nav-fg)",
-    background: "transparent",
-  },
-  userName: {
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: "100%",
   },
   userBtnEditMode: {
     borderColor: "#66c7ff",
@@ -525,10 +601,9 @@ const styles: Record<string, React.CSSProperties> = {
   authMenu: {
     position: "absolute",
     top: "calc(100% + 6px)",
-    left: 0,
+    right: 0,
     zIndex: 1300,
-    width: "100%",
-    minWidth: 168,
+    width: 180,
     padding: 8,
     border: "1px solid var(--tp-nav-fg)",
     borderRadius: 8,
@@ -580,19 +655,38 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 10px",
     justifyContent: "center",
   },
-  navSearch: {
+  navSearchWrap: {
     width: "100%",
     height: NAV_CONTROL_H,
-    padding: "0 46px 0 14px",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "0 8px",
     borderRadius: 8,
-    border: "1px solid var(--tp-nav-fg)",
-    fontSize: 13,
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "var(--tp-nav-fg)",
+  },
+  navSearchWrapMobile: {
+    height: 40,
+  },
+  navSearchIcon: {
+    opacity: 0.9,
+    transform: "scale(1.3)",
+  },
+  navSearchInput: {
+    width: "100%",
+    height: "100%",
+    border: "none",
+    fontSize: 14,
+    fontWeight: 600,
     outline: "none",
-    background: "var(--tp-nav-inverse)",
+    background: "transparent",
+    backgroundColor: "transparent",
+    WebkitAppearance: "none",
     color: "var(--tp-nav-fg)",
   },
   navSearchMobile: {
-    height: 40,
     fontSize: 14,
   },
   navClear: {
@@ -611,10 +705,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   viewToggle: {
     display: "inline-flex",
-    border: "1px solid var(--tp-nav-fg)",
+    border: "1px solid transparent",
     borderRadius: 8,
     overflow: "hidden",
-    background: "var(--tp-nav-inverse)",
+    background: "transparent",
     height: NAV_CONTROL_H,
   },
   viewToggleMobile: {
@@ -624,7 +718,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: NAV_CONTROL_H,
     minWidth: NAV_CONTROL_H,
     border: "none",
-    borderRight: "1px solid var(--tp-nav-fg)",
+    borderRight: "none",
     background: "transparent",
     color: "var(--tp-nav-fg)",
     cursor: "pointer",
@@ -639,8 +733,8 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 40,
   },
   viewBtnActive: {
-    background: "var(--tp-nav-fg)",
-    color: "var(--tp-nav-inverse)",
+    background: "transparent",
+    color: "var(--tp-accent)",
   },
   viewBtnLast: {
     borderRight: "none",

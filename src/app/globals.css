@@ -13,6 +13,8 @@
   --tp-cta-bg: #ffffff;
   --tp-cta-fg: #000000;
   --tp-cta-border: #ffffff;
+  --tp-accent: #66c7ff;
+  --tp-checkbox-color: rgba(255, 255, 255, 0.7);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -42,6 +44,16 @@
   --tp-cta-bg: #ffffff;
   --tp-cta-fg: #000000;
   --tp-cta-border: #ffffff;
+  --tp-checkbox-color: rgba(255, 255, 255, 0.7);
+}
+
+/* Softer checkbox tone on dark backgrounds */
+[data-tp-mode="dark"] input[type="checkbox"] {
+  accent-color: var(--tp-checkbox-color);
+}
+
+[data-tp-mode="light"] input[type="checkbox"] {
+  accent-color: var(--tp-checkbox-color);
 }
 
 html,
@@ -73,6 +85,32 @@ a {
 .tp-content-rail {
   width: var(--tp-rail-width);
   margin-inline: auto;
+}
+
+.tp-navbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0)
+  );
+  pointer-events: none;
+}
+
+.tp-nav-search::placeholder {
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+}
+
+[data-tp-mode="light"] .tp-nav-search::placeholder {
+  color: rgba(17, 17, 17, 0.75);
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

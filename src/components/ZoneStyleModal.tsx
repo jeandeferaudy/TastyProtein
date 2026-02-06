@@ -9,6 +9,16 @@ export type ZoneStyleDraft = {
   bg_image_url: string;
 };
 
+export type ThemeColorsDraft = {
+  accent_color: string;
+  text_color: string;
+  line_color: string;
+  button_border_color: string;
+  button_bg_color: string;
+  checkbox_color: string;
+  background_color?: string;
+};
+
 type Props = {
   isOpen: boolean;
   zoneLabel: string;
@@ -20,6 +30,8 @@ type Props = {
   onUploadFile?: (file: File) => Promise<string>;
   themeMode?: "dark" | "light";
   onThemeModeChange?: (next: "dark" | "light") => void;
+  themeColors?: ThemeColorsDraft;
+  onSaveThemeColors?: (next: ThemeColorsDraft) => void;
 };
 
 export default function ZoneStyleModal({
@@ -33,16 +45,29 @@ export default function ZoneStyleModal({
   onUploadFile,
   themeMode,
   onThemeModeChange,
+  themeColors,
+  onSaveThemeColors,
 }: Props) {
   const [draft, setDraft] = React.useState<ZoneStyleDraft>(initial);
+  const [colorsDraft, setColorsDraft] = React.useState<ThemeColorsDraft | null>(
+    themeColors ? { ...themeColors } : null
+  );
   const [localError, setLocalError] = React.useState<string>("");
+
+  const toColorValue = React.useCallback((value: string | null | undefined) => {
+    const raw = String(value ?? "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(raw) || /^#[0-9a-fA-F]{3}$/.test(raw)
+      ? raw
+      : "#000000";
+  }, []);
 
   React.useEffect(() => {
     if (isOpen) {
       setDraft(initial);
+      setColorsDraft(themeColors ? { ...themeColors } : null);
       setLocalError("");
     }
-  }, [initial, isOpen]);
+  }, [initial, isOpen, themeColors]);
 
   if (!isOpen) return null;
   const isLight = themeMode === "light";
@@ -126,14 +151,14 @@ export default function ZoneStyleModal({
 
         <label style={styles.label}>Background color</label>
         <div style={styles.colorRow}>
-          <input
-            type="color"
-            value={draft.bg_color || "#000000"}
-            onChange={(e) =>
-              setDraft((prev) => ({ ...prev, bg_color: e.target.value }))
-            }
-            style={styles.colorInput}
-          />
+            <input
+              type="color"
+              value={toColorValue(draft.bg_color || "#000000")}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, bg_color: e.target.value }))
+              }
+              style={styles.colorInput}
+            />
           <input
             type="text"
             value={draft.bg_color}
@@ -188,6 +213,196 @@ export default function ZoneStyleModal({
         <label style={styles.label}>Preview</label>
         <div style={{ ...styles.preview, ...previewStyle }} />
 
+        {colorsDraft && onSaveThemeColors ? (
+          <>
+            <div style={styles.sectionDivider} />
+            <div style={styles.sectionTitle}>Theme colors</div>
+            <div style={styles.colorGrid}>
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Accent</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.accent_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, accent_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.accent_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, accent_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Text</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.text_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, text_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.text_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, text_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Lines</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.line_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, line_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.line_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, line_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Buttons</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.button_border_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, button_border_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.button_border_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, button_border_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Button bg</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.button_bg_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, button_bg_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.button_bg_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, button_bg_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Checkbox</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.checkbox_color)}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, checkbox_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.checkbox_color}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, checkbox_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Background</span>
+                <div style={styles.colorRow}>
+                  <input
+                    type="color"
+                    value={toColorValue(colorsDraft.background_color || "#000000")}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, background_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.colorInput}
+                  />
+                  <input
+                    type="text"
+                    value={colorsDraft.background_color || ""}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, background_color: e.target.value } : prev
+                      )
+                    }
+                    style={styles.input}
+                  />
+                </div>
+              </label>
+            </div>
+          </>
+        ) : null}
+
         {localError ? <div style={styles.error}>{localError}</div> : null}
         {error ? <div style={styles.error}>{error}</div> : null}
 
@@ -195,7 +410,15 @@ export default function ZoneStyleModal({
           <AppButton variant="ghost" style={styles.footerBtn} onClick={onClose}>
             CANCEL
           </AppButton>
-          <AppButton variant="ghost" style={styles.footerBtn} onClick={() => onSave(draft)} disabled={saving}>
+          <AppButton
+            variant="ghost"
+            style={styles.footerBtn}
+            onClick={() => {
+              onSave(draft);
+              if (colorsDraft && onSaveThemeColors) onSaveThemeColors(colorsDraft);
+            }}
+            disabled={saving}
+          >
             {saving ? "SAVING..." : "SAVE"}
           </AppButton>
         </div>
@@ -325,6 +548,30 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 8,
     color: "#ff9f9f",
     fontSize: 13,
+  },
+  sectionDivider: {
+    height: 1,
+    background: "rgba(255,255,255,0.15)",
+    margin: "18px 0 12px",
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: 800,
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  colorGrid: {
+    display: "grid",
+    gap: 12,
+  },
+  colorField: {
+    display: "grid",
+    gap: 6,
+  },
+  colorLabel: {
+    fontSize: 12,
+    opacity: 0.8,
+    letterSpacing: 0.4,
   },
   footer: {
     marginTop: 14,

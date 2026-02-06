@@ -1528,7 +1528,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: 0,
     right: 0,
     height: `calc(100vh - ${TOPBAR_H}px)`,
-    background: "black",
+    backgroundColor: "transparent",
     zIndex: 850,
   },
 
@@ -1544,8 +1544,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     pointerEvents: "auto",
-    background: "black",
+    backgroundColor: "transparent",
     borderRadius: 0,
+    boxShadow: "none",
+    border: "none",
   },
 
   topRow: {

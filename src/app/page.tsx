@@ -13,7 +13,7 @@ import AuthModal from "@/components/AuthModal";
 import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
-import ZoneStyleModal, { type ZoneStyleDraft } from "@/components/ZoneStyleModal";
+import ZoneStyleModal, { type ZoneStyleDraft, type ThemeColorsDraft } from "@/components/ZoneStyleModal";
 import LogoEditorModal from "@/components/LogoEditorModal";
 
 import { formatMoney } from "@/lib/money";
@@ -46,6 +46,7 @@ type ZoneName = "header" | "navbar" | "main";
 
 type ZoneRow = {
   zone: ZoneName;
+  mode: "dark" | "light";
   bg_type: "color" | "image";
   bg_color: string | null;
   bg_image_url: string | null;
@@ -73,6 +74,12 @@ const UI_ASSETS_BUCKET = "ui-assets";
 
 type BrandingRow = {
   logo_url: string | null;
+  logo_url_dark?: string | null;
+  logo_url_light?: string | null;
+};
+
+type ThemeColorsRow = ThemeColorsDraft & {
+  mode: "dark" | "light";
 };
 
 function SettingsIcon({ size = 16 }: { size?: number }) {
@@ -180,7 +187,7 @@ export default function Page() {
   const [zoneEditorTarget, setZoneEditorTarget] = React.useState<ZoneName>("header");
   const [zoneEditorSaving, setZoneEditorSaving] = React.useState<boolean>(false);
   const [zoneEditorError, setZoneEditorError] = React.useState<string>("");
-  const [themeMode, setThemeMode] = React.useState<"dark" | "light">("dark");
+  const [themeMode] = React.useState<"dark" | "light">("dark");
   const [logoUrlsByMode, setLogoUrlsByMode] = React.useState<Record<"dark" | "light", string>>({
     dark: "",
     light: "",
@@ -188,6 +195,32 @@ export default function Page() {
   const [logoEditorOpen, setLogoEditorOpen] = React.useState<boolean>(false);
   const [logoEditorSaving, setLogoEditorSaving] = React.useState<boolean>(false);
   const [logoEditorError, setLogoEditorError] = React.useState<string>("");
+  const DEFAULT_THEME_COLORS_BY_MODE: Record<"dark" | "light", ThemeColorsDraft> = React.useMemo(
+    () => ({
+      dark: {
+        accent_color: "#66c7ff",
+        text_color: "#ffffff",
+        line_color: "#ffffff",
+        button_border_color: "#ffffff",
+        button_bg_color: "transparent",
+        checkbox_color: "#cfd6dd",
+        background_color: "#000000",
+      },
+      light: {
+        accent_color: "#2b8cff",
+        text_color: "#111111",
+        line_color: "#111111",
+        button_border_color: "#111111",
+        button_bg_color: "transparent",
+        checkbox_color: "#6c747c",
+        background_color: "#ffffff",
+      },
+    }),
+    []
+  );
+  const [themeColorsByMode, setThemeColorsByMode] = React.useState<
+    Record<"dark" | "light", ThemeColorsDraft>
+  >(DEFAULT_THEME_COLORS_BY_MODE);
 
   // ----------------------------
   // Panels
@@ -260,17 +293,8 @@ export default function Page() {
   }, [isMobileViewport]);
 
   React.useEffect(() => {
-    const raw = window.localStorage.getItem("tp_theme_mode");
-    if (raw === "dark" || raw === "light") setThemeMode(raw);
+    document.documentElement.setAttribute("data-tp-mode", "dark");
   }, []);
-
-  React.useEffect(() => {
-    window.localStorage.setItem("tp_theme_mode", themeMode);
-  }, [themeMode]);
-
-  React.useEffect(() => {
-    document.documentElement.setAttribute("data-tp-mode", themeMode);
-  }, [themeMode]);
 
   // ----------------------------
   // Session init
@@ -355,17 +379,33 @@ export default function Page() {
 
   React.useEffect(() => {
     const loadZoneStyles = async () => {
-      const { data, error } = await supabase
+      let rows: ZoneRow[] = [];
+      let hasMode = true;
+      const withMode = await supabase
         .from("ui_zone_styles")
-        .select("zone,bg_type,bg_color,bg_image_url");
-      const rows = error ? [] : ((data ?? []) as ZoneRow[]);
+        .select("zone,mode,bg_type,bg_color,bg_image_url");
+      if (withMode.error) {
+        hasMode = false;
+        const legacy = await supabase
+          .from("ui_zone_styles")
+          .select("zone,bg_type,bg_color,bg_image_url");
+        if (!legacy.error) {
+          rows = ((legacy.data ?? []) as Array<Omit<ZoneRow, "mode">>).map((row) => ({
+            ...row,
+            mode: "dark",
+          }));
+        }
+      } else {
+        rows = (withMode.data ?? []) as ZoneRow[];
+      }
       setZoneStylesByMode((prev) => {
-        const next = {
-          dark: { ...prev.dark },
-          light: { ...prev.light },
+        const next: Record<"dark" | "light", Record<ZoneName, ZoneStyleDraft>> = {
+          dark: { ...DEFAULT_ZONE_STYLES_BY_MODE.dark },
+          light: { ...DEFAULT_ZONE_STYLES_BY_MODE.light },
         };
         for (const row of rows) {
           if (row.zone !== "header" && row.zone !== "navbar" && row.zone !== "main") continue;
+          if (row.mode !== "dark" && row.mode !== "light") continue;
           const styleDraft: ZoneStyleDraft = {
             bg_type: row.bg_type === "image" ? "image" : "color",
             bg_color:
@@ -373,24 +413,17 @@ export default function Page() {
               (row.zone === "navbar" ? "#ffffff" : "#000000"),
             bg_image_url: row.bg_image_url ?? "",
           };
-          next.dark[row.zone] = styleDraft;
-          next.light[row.zone] = styleDraft;
+          if (hasMode) {
+            next[row.mode][row.zone] = styleDraft;
+          } else {
+            next.dark[row.zone] = styleDraft;
+            next.light[row.zone] = styleDraft;
+          }
         }
         try {
-          const raw = window.localStorage.getItem("tp_zone_styles_by_mode");
-          if (raw) {
-            const parsed = JSON.parse(raw) as Partial<
-              Record<"dark" | "light", Partial<Record<ZoneName, ZoneStyleDraft>>>
-            >;
-            if (parsed.dark) {
-              next.dark = { ...next.dark, ...parsed.dark } as Record<ZoneName, ZoneStyleDraft>;
-            }
-            if (parsed.light) {
-              next.light = { ...next.light, ...parsed.light } as Record<ZoneName, ZoneStyleDraft>;
-            }
-          }
+          window.localStorage.setItem("tp_zone_styles_by_mode", JSON.stringify(next));
         } catch {
-          // ignore invalid local cache
+          // ignore storage errors
         }
         return next;
       });
@@ -400,24 +433,27 @@ export default function Page() {
 
   React.useEffect(() => {
     const loadLogo = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("ui_branding")
-        .select("logo_url")
+        .select("logo_url,logo_url_dark,logo_url_light")
         .limit(1)
         .maybeSingle();
-      const row = (data ?? null) as BrandingRow | null;
+      let row = (data ?? null) as BrandingRow | null;
+      if (error) {
+        const legacy = await supabase
+          .from("ui_branding")
+          .select("logo_url")
+          .limit(1)
+          .maybeSingle();
+        row = (legacy.data ?? null) as BrandingRow | null;
+      }
       const fallback = row?.logo_url ?? "";
       const next: Record<"dark" | "light", string> = {
-        dark: fallback,
-        light: fallback,
+        dark: (row?.logo_url_dark ?? "").trim() || fallback,
+        light: (row?.logo_url_light ?? "").trim() || fallback,
       };
       try {
-        const raw = window.localStorage.getItem("tp_logo_urls_by_mode");
-        if (raw) {
-          const parsed = JSON.parse(raw) as Partial<Record<"dark" | "light", string>>;
-          if (typeof parsed.dark === "string") next.dark = parsed.dark;
-          if (typeof parsed.light === "string") next.light = parsed.light;
-        }
+        window.localStorage.setItem("tp_logo_urls_by_mode", JSON.stringify(next));
       } catch {
         // ignore local cache parse issues
       }
@@ -425,6 +461,75 @@ export default function Page() {
     };
     loadLogo();
   }, []);
+
+  React.useEffect(() => {
+    const loadThemeColors = async () => {
+      const { data, error } = await supabase
+        .from("ui_theme_colors")
+        .select(
+          "mode,accent_color,text_color,line_color,button_border_color,button_bg_color,checkbox_color,background_color"
+        );
+      if (error || !data) return;
+      setThemeColorsByMode((prev) => {
+        const next = {
+          dark: { ...DEFAULT_THEME_COLORS_BY_MODE.dark },
+          light: { ...DEFAULT_THEME_COLORS_BY_MODE.light },
+        };
+        for (const row of data as ThemeColorsRow[]) {
+          if (row.mode !== "dark" && row.mode !== "light") continue;
+          next[row.mode] = {
+            ...next[row.mode],
+            accent_color: row.accent_color ?? next[row.mode].accent_color,
+            text_color: row.text_color ?? next[row.mode].text_color,
+            line_color: row.line_color ?? next[row.mode].line_color,
+            button_border_color:
+              row.button_border_color ?? next[row.mode].button_border_color,
+            button_bg_color: row.button_bg_color ?? next[row.mode].button_bg_color,
+            checkbox_color: row.checkbox_color ?? next[row.mode].checkbox_color,
+            background_color: row.background_color ?? next[row.mode].background_color,
+          };
+        }
+        try {
+          window.localStorage.setItem("tp_theme_colors_by_mode", JSON.stringify(next));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    };
+    loadThemeColors();
+  }, [DEFAULT_THEME_COLORS_BY_MODE]);
+
+  const hexToRgba = React.useCallback((value: string, alpha: number) => {
+    const raw = String(value || "").trim();
+    if (!raw) return `rgba(255,255,255,${alpha})`;
+    if (raw.startsWith("rgba") || raw.startsWith("rgb")) return raw;
+    const hex = raw.startsWith("#") ? raw.slice(1) : raw;
+    if (!/^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(hex)) return raw;
+    const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }, []);
+
+  const themeColors = themeColorsByMode[themeMode];
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--tp-accent", themeColors.accent_color || "#66c7ff");
+    root.style.setProperty("--tp-text-color", themeColors.text_color || "#ffffff");
+    root.style.setProperty("--tp-border-color", themeColors.line_color || "#ffffff");
+    root.style.setProperty(
+      "--tp-border-color-soft",
+      hexToRgba(themeColors.line_color || "#ffffff", 0.35)
+    );
+    root.style.setProperty("--tp-cta-border", themeColors.button_border_color || "#ffffff");
+    root.style.setProperty("--tp-cta-bg", themeColors.button_bg_color || "transparent");
+    root.style.setProperty("--tp-cta-fg", themeColors.text_color || "#ffffff");
+    root.style.setProperty("--tp-checkbox-color", themeColors.checkbox_color || "#cfd6dd");
+    root.style.setProperty("--tp-page-bg", themeColors.background_color || "#000000");
+  }, [hexToRgba, themeColors]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -585,13 +690,14 @@ export default function Page() {
       try {
         const payload = {
           zone: zoneEditorTarget,
+          mode: themeMode,
           bg_type: next.bg_type,
           bg_color: next.bg_color || null,
           bg_image_url: next.bg_image_url || null,
         };
         const { error } = await supabase
           .from("ui_zone_styles")
-          .upsert(payload, { onConflict: "zone" });
+          .upsert(payload, { onConflict: "zone,mode" });
         if (error) throw error;
         setZoneStylesByMode((prev) => {
           const updated = {
@@ -606,7 +712,18 @@ export default function Page() {
         });
         setZoneEditorOpen(false);
       } catch (e: unknown) {
-        setZoneEditorError(e instanceof Error ? e.message : "Failed to save style.");
+        const message =
+          typeof e === "object" && e && "message" in e
+            ? String((e as { message?: string }).message)
+            : e instanceof Error
+            ? e.message
+            : "Failed to save style.";
+        const details =
+          typeof e === "object" && e && "details" in e
+            ? String((e as { details?: string }).details)
+            : "";
+        setZoneEditorError(details ? `${message} (${details})` : message);
+        console.error("[zone-style] save failed", e);
       } finally {
         setZoneEditorSaving(false);
       }
@@ -639,9 +756,13 @@ export default function Page() {
     setLogoEditorSaving(true);
     setLogoEditorError("");
     try {
+      const payload =
+        themeMode === "light"
+          ? { id: 1, logo_url_light: nextUrl || null }
+          : { id: 1, logo_url_dark: nextUrl || null };
       const { error } = await supabase
         .from("ui_branding")
-        .upsert({ id: 1, logo_url: nextUrl || null }, { onConflict: "id" });
+        .upsert(payload, { onConflict: "id" });
       if (error) throw error;
       setLogoUrlsByMode((prev) => {
         const updated = { ...prev, [themeMode]: nextUrl };
@@ -656,33 +777,26 @@ export default function Page() {
     }
   }, [themeMode]);
 
-  const headerZoneStyle = React.useMemo<React.CSSProperties>(() => {
-    const cfg = zoneStylesByMode[themeMode].header;
-    if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
-      return {
-        backgroundColor: cfg.bg_color || "#000000",
-        backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      };
+  const saveThemeColors = React.useCallback(async (next: ThemeColorsDraft) => {
+    try {
+      const payload = { mode: themeMode, ...next };
+      const { error } = await supabase
+        .from("ui_theme_colors")
+        .upsert(payload, { onConflict: "mode" });
+      if (error) throw error;
+      setThemeColorsByMode((prev) => ({ ...prev, [themeMode]: { ...prev[themeMode], ...next } }));
+    } catch (e) {
+      console.error("[theme-colors] save failed", e);
     }
-    return { background: cfg.bg_color || "#000000" };
-  }, [themeMode, zoneStylesByMode]);
+  }, [themeMode]);
+
+  const headerZoneStyle = React.useMemo<React.CSSProperties>(() => {
+    return { background: "transparent" };
+  }, []);
 
   const navbarZoneStyle = React.useMemo<React.CSSProperties>(() => {
-    const cfg = zoneStylesByMode[themeMode].navbar;
-    if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
-      return {
-        backgroundColor: cfg.bg_color || "#ffffff",
-        backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-      };
-    }
-    return { background: cfg.bg_color || "#ffffff" };
-  }, [themeMode, zoneStylesByMode]);
+    return { background: "transparent" };
+  }, []);
 
   const navbarDisplayStyle = React.useMemo<React.CSSProperties>(
     () => ({
@@ -690,25 +804,42 @@ export default function Page() {
     }),
     [navbarZoneStyle]
   );
-  const navbarTone: "dark-bg" | "light-bg" = React.useMemo(() => {
-    const cfg = zoneStylesByMode[themeMode].navbar;
-    const bg = cfg.bg_color || "#ffffff";
-    return isDarkColor(bg) ? "dark-bg" : "light-bg";
-  }, [themeMode, zoneStylesByMode]);
+  const navbarTone: "dark-bg" | "light-bg" = React.useMemo(
+    () => (themeMode === "dark" ? "dark-bg" : "light-bg"),
+    [themeMode]
+  );
 
   const mainZoneStyle = React.useMemo<React.CSSProperties>(() => {
     const cfg = zoneStylesByMode[themeMode].main;
     if (cfg.bg_type === "image" && cfg.bg_image_url.trim()) {
       return {
-        backgroundColor: cfg.bg_color || "#000000",
+        backgroundColor: cfg.bg_color || themeColors.background_color || "#000000",
         backgroundImage: `url("${cfg.bg_image_url.trim()}")`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",
       };
     }
-    return { background: cfg.bg_color || "#000000" };
-  }, [themeMode, zoneStylesByMode]);
+    return { background: cfg.bg_color || themeColors.background_color || "#000000" };
+  }, [themeColors.background_color, themeMode, zoneStylesByMode]);
+
+  const closePrimaryDrawers = React.useCallback(() => {
+    setPanel(null);
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
+  }, []);
+
+  const isPrimaryDrawerOpen = React.useMemo(
+    () => panel !== null || detailsOpen || ordersOpen || allOrdersOpen || !!orderDrawerSource,
+    [allOrdersOpen, detailsOpen, orderDrawerSource, ordersOpen, panel]
+  );
+
+  React.useEffect(() => {
+    if (isPrimaryDrawerOpen) setMobileFiltersOpen(false);
+  }, [isPrimaryDrawerOpen]);
 
   // ----------------------------
   // Cart refresh (IMPORTANT: declared BEFORE changeQty)
@@ -823,14 +954,22 @@ React.useEffect(() => {
   }, [products, selectedId]);
 
   const cartItemsForDisplay = React.useMemo(() => {
-    return cartItems.map((item) => {
+    const enriched = cartItems.map((item) => {
       const product = products.find((p) => String(p.id) === item.productId);
       if (item.temperature && item.thumbnailUrl) return item;
       return {
         ...item,
+        country: item.country ?? product?.country_of_origin ?? null,
+        type: product?.type ?? null,
         temperature: product?.temperature ?? null,
         thumbnailUrl: item.thumbnailUrl ?? product?.thumbnail_url ?? null,
       };
+    });
+    return enriched.sort((a, b) => {
+      const typeA = String(a.type ?? "").toLowerCase();
+      const typeB = String(b.type ?? "").toLowerCase();
+      if (typeA !== typeB) return typeA.localeCompare(typeB);
+      return String(a.name ?? "").localeCompare(String(b.name ?? ""));
     });
   }, [cartItems, products]);
 
@@ -839,29 +978,29 @@ React.useEffect(() => {
   // ----------------------------
   const scrollToProducts = React.useCallback(() => {
     setAdminAllProductsMode(false);
-    setPanel(null);
+    closePrimaryDrawers();
     const el = listScrollRef.current;
     if (!el) return;
     el.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  }, [closePrimaryDrawers]);
 
   const openAllProductsView = React.useCallback(() => {
     if (!isAdmin) return;
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setAdminAllProductsMode(true);
+    const el = listScrollRef.current;
+    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+  }, [closePrimaryDrawers, isAdmin]);
+
+  const openProduct = React.useCallback((id: string) => {
+    listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
+    setSelectedId(id);
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
-    setCartOpen(false);
-    setPanel(null);
-    setAdminAllProductsMode(true);
-    const el = listScrollRef.current;
-    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
-  }, [isAdmin]);
-
-  const openProduct = React.useCallback((id: string) => {
-    listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
-    setSelectedId(id);
     setPanel("product");
   }, []);
 
@@ -871,6 +1010,11 @@ React.useEffect(() => {
       listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
       setEditorReturnToProduct(panel === "product");
       setSelectedId(id);
+      setDetailsOpen(false);
+      setOrdersOpen(false);
+      setAllOrdersOpen(false);
+      setOrderDrawerSource(null);
+      setSelectedOrderDetail(null);
       setPanel("edit");
     },
     [isAdmin, panel]
@@ -895,6 +1039,11 @@ React.useEffect(() => {
     listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
     setEditorReturnToProduct(false);
     setSelectedId(String(data.id));
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
     setPanel("edit");
   }, [isAdmin, loadCatalog]);
 
@@ -903,10 +1052,10 @@ React.useEffect(() => {
       setPanel("product");
       return;
     }
-    setPanel(null);
+    closePrimaryDrawers();
     const el = listScrollRef.current;
     if (el) el.scrollTop = listScrollTopRef.current;
-  }, [editorReturnToProduct, selectedId]);
+  }, [closePrimaryDrawers, editorReturnToProduct, selectedId]);
 
   const updateProductStatus = React.useCallback(
     async (id: string, nextStatus: "Active" | "Disabled" | "Archived") => {
@@ -938,10 +1087,10 @@ React.useEffect(() => {
   );
 
   const backToList = React.useCallback(() => {
-    setPanel(null);
+    closePrimaryDrawers();
     const el = listScrollRef.current;
     if (el) el.scrollTop = listScrollTopRef.current;
-  }, []);
+  }, [closePrimaryDrawers]);
 
   const openCheckout = React.useCallback(() => {
     const loadProfileForCheckout = async () => {
@@ -999,17 +1148,20 @@ React.useEffect(() => {
     };
 
     setCartOpen(false);
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
     void loadProfileForCheckout();
     setPanel("checkout");
   }, [authEmail, authPhone, authUserId]);
 
   const openProfileDrawer = React.useCallback(() => {
-    setOrdersOpen(false);
-    setAllOrdersOpen(false);
+    closePrimaryDrawers();
     setCartOpen(false);
-    setPanel(null);
     setDetailsOpen(true);
-  }, []);
+  }, [closePrimaryDrawers]);
 
   const loadAndSelectOrder = React.useCallback(async (orderId: string) => {
     setLoadingOrderDetail(true);
@@ -1140,17 +1292,13 @@ React.useEffect(() => {
         console.error("Failed to load my orders", e);
       }
     };
-    setDetailsOpen(false);
-    setAllOrdersOpen(false);
+    closePrimaryDrawers();
     setCartOpen(false);
-    setPanel(null);
-    setOrderDrawerSource(null);
     setSelectedMyOrderId(null);
     setSelectedAllOrderId(null);
-    setSelectedOrderDetail(null);
     void loadMyOrders();
     setOrdersOpen(true);
-  }, [authEmail, authPhone, authUserId]);
+  }, [authEmail, authPhone, authUserId, closePrimaryDrawers]);
 
   const openAllOrdersDrawer = React.useCallback(() => {
     const loadAllOrders = async () => {
@@ -1161,17 +1309,13 @@ React.useEffect(() => {
         console.error("Failed to load all orders", e);
       }
     };
-    setDetailsOpen(false);
-    setOrdersOpen(false);
+    closePrimaryDrawers();
     setCartOpen(false);
-    setPanel(null);
-    setOrderDrawerSource(null);
     setSelectedMyOrderId(null);
     setSelectedAllOrderId(null);
-    setSelectedOrderDetail(null);
     void loadAllOrders();
     setAllOrdersOpen(true);
-  }, []);
+  }, [closePrimaryDrawers]);
 
   const composeAddress = React.useCallback((draft: CustomerDraft) => {
     const d = draft as Record<string, unknown>;
@@ -1376,14 +1520,7 @@ React.useEffect(() => {
       {/* Header */}
       <div ref={headerRef} style={{ ...styles.headerWrap, ...headerZoneStyle }}>
         <div style={styles.headerInner}>
-          <button
-            type="button"
-            style={styles.headerThemeBtn}
-            onClick={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
-            title="Toggle dark / light mode"
-          >
-            {themeMode === "dark" ? "LIGHTS ON" : "LIGHTS OFF"}
-          </button>
+          {null}
           <div style={styles.brandWrap}>
             {(logoUrlsByMode[themeMode] ?? "").trim() ? (
               <img src={(logoUrlsByMode[themeMode] ?? "").trim()} alt="Merville Prime" style={styles.brandLogo} />
@@ -1406,15 +1543,15 @@ React.useEffect(() => {
             ) : null}
           </div>
           {isAdmin && editMode ? (
-            <button
-              type="button"
-              style={styles.zoneEditBtn}
-              onClick={() => openZoneEditor("header")}
-              aria-label="Edit header zone"
-              title="Edit header zone"
-            >
-              <SettingsIcon size={16} />
-            </button>
+          <button
+            type="button"
+            style={styles.zoneEditBtn}
+            onClick={() => openZoneEditor("main")}
+            aria-label="Edit header zone"
+            title="Edit header zone"
+          >
+            <SettingsIcon size={16} />
+          </button>
           ) : null}
         </div>
       </div>
@@ -1427,21 +1564,12 @@ React.useEffect(() => {
           totalUnits={totalUnits}
           subtotal={subtotal}
           onOpenCart={() => {
-            setDetailsOpen(false);
-            setOrdersOpen(false);
-            setAllOrdersOpen(false);
-            setPanel(null);
             setCartOpen(true);
           }}
           onShop={() => {
-            setDetailsOpen(false);
-            setOrdersOpen(false);
-            setAllOrdersOpen(false);
-            setOrderDrawerSource(null);
-            setSelectedOrderDetail(null);
+            closePrimaryDrawers();
             setCartOpen(false);
             setAdminAllProductsMode(false);
-            setPanel(null);
             scrollToProducts();
           }}
           gridView={resolvedGridView}
@@ -1458,8 +1586,7 @@ React.useEffect(() => {
           onLogout={logout}
           navTone={navbarTone}
           zoneStyle={navbarDisplayStyle}
-          showZoneEditor={isAdmin && editMode}
-          onOpenZoneEditor={() => openZoneEditor("navbar")}
+          showZoneEditor={false}
           formatMoney={formatMoney}
           searchStartOffset={isMobileViewport ? 0 : 252}
           isMobile={isMobileViewport}
@@ -1467,178 +1594,180 @@ React.useEffect(() => {
       </div>
 
       {/* Products list */}
-      <div
-        ref={listScrollRef}
-        style={{
-          ...styles.listScroll,
-          ...(mainZoneStyle ?? null),
-          height: `calc(100vh - ${topOffset}px)`,
-        }}
-      >
-        {isAdmin && editMode ? (
-          <button
-            type="button"
-            style={styles.mainZoneEditBtn}
-            onClick={() => openZoneEditor("main")}
-            aria-label="Edit main zone"
-            title="Edit main zone"
-          >
-            <SettingsIcon size={16} />
-          </button>
-        ) : null}
+      {!isPrimaryDrawerOpen ? (
         <div
+          ref={listScrollRef}
           style={{
-            ...styles.productsLayout,
-            width: isMobileViewport ? "100%" : "var(--tp-rail-width)",
-            gridTemplateColumns: isMobileViewport ? "1fr" : "250px minmax(0, 1fr)",
+            ...styles.listScroll,
+            ...(mainZoneStyle ?? null),
+            height: `calc(100vh - ${topOffset}px)`,
           }}
         >
-          {!isMobileViewport ? (
-            <aside style={styles.filterPanel}>
-              {isAdmin && adminAllProductsMode ? (
-                <button type="button" style={styles.createBtn} onClick={() => void createProduct()}>
-                  CREATE
-                </button>
-              ) : null}
-              <div style={styles.filterTitle}>FILTERS</div>
-              <div style={styles.filterActions}>
-                <button
-                  type="button"
-                  style={styles.filterActionBtn}
-                  onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  style={styles.filterActionBtn}
-                  onClick={() => setSelectedTypes([])}
-                >
-                  None
-                </button>
-              </div>
-              <div style={styles.filterList}>
-                {productTypes.map((typeItem) => (
-                  <label key={typeItem.key} style={styles.filterItem}>
-                    <input
-                      type="checkbox"
-                      checked={selectedTypes.includes(typeItem.key)}
-                      onChange={() =>
-                        setSelectedTypes((prev) =>
-                          prev.includes(typeItem.key)
-                            ? prev.filter((t) => t !== typeItem.key)
-                            : [...prev, typeItem.key]
-                        )
-                      }
-                    />
-                    <span>{typeItem.label}</span>
-                  </label>
-                ))}
-              </div>
-            </aside>
-          ) : null}
-
-          <div style={styles.gridWrap}>
-            <ProductGrid
-              products={filteredProducts}
-              loading={loadingProducts}
-              cart={cart}
-              viewMode={resolvedGridView}
-              contained
-              canEditProducts={isAdmin && (editMode || adminAllProductsMode)}
-              onAdd={addToCart}
-              onRemove={removeFromCart}
-              onOpenProduct={openProduct}
-              onEditProduct={openEditProduct}
-              onQuickStatusChange={updateProductStatus}
-              formatMoney={formatMoney}
-            />
-          </div>
-        </div>
-
-        {isMobileViewport ? (
-          <button
-            type="button"
+          {null}
+          <div
             style={{
-              ...styles.mobileFilterFab,
-              ...(selectedTypes.length > 0 ? styles.mobileFilterFabActive : null),
+              ...styles.productsLayout,
+              width: isMobileViewport ? "100%" : "var(--tp-rail-width)",
+              gridTemplateColumns: isMobileViewport ? "1fr" : "250px minmax(0, 1fr)",
             }}
-            onClick={() => setMobileFiltersOpen((v) => !v)}
-            aria-label="Open filters"
-            title="Filters"
           >
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-              <path
-                d="M4 7h16M7 12h10M10 17h4"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              />
-            </svg>
-            {selectedTypes.length > 0 ? (
-              <span style={styles.mobileFilterBadge}>{selectedTypes.length}</span>
+            {!isMobileViewport ? (
+              <aside style={styles.filterPanel}>
+                {isAdmin && adminAllProductsMode ? (
+                  <button
+                    type="button"
+                    style={styles.createBtn}
+                    onClick={() => void createProduct()}
+                  >
+                    CREATE
+                  </button>
+                ) : null}
+                <div style={styles.filterTitle}>FILTERS</div>
+                <div style={styles.filterActions}>
+                  <button
+                    type="button"
+                    style={styles.filterActionBtn}
+                    onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.filterActionBtn}
+                    onClick={() => setSelectedTypes([])}
+                  >
+                    None
+                  </button>
+                </div>
+                <div style={styles.filterList}>
+                  {productTypes.map((typeItem) => (
+                    <label key={typeItem.key} style={styles.filterItem}>
+                      <input
+                        type="checkbox"
+                        checked={selectedTypes.includes(typeItem.key)}
+                        onChange={() =>
+                          setSelectedTypes((prev) =>
+                            prev.includes(typeItem.key)
+                              ? prev.filter((t) => t !== typeItem.key)
+                              : [...prev, typeItem.key]
+                          )
+                        }
+                      />
+                      <span>{typeItem.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </aside>
             ) : null}
-          </button>
-        ) : null}
-        {isMobileViewport && mobileFiltersOpen ? (
-          <div style={styles.mobileFilterModalBackdrop} onClick={() => setMobileFiltersOpen(false)}>
-            <aside
-              className="tp-sheet-slide-up"
-              style={styles.mobileFilterModal}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {isAdmin && adminAllProductsMode ? (
-                <button type="button" style={styles.createBtn} onClick={() => void createProduct()}>
-                  CREATE
-                </button>
-              ) : null}
-              <div style={styles.filterTitle}>FILTERS</div>
-              <div style={styles.filterActions}>
-                <button
-                  type="button"
-                  style={styles.filterActionBtn}
-                  onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  style={styles.filterActionBtn}
-                  onClick={() => setSelectedTypes([])}
-                >
-                  None
-                </button>
-              </div>
-              <div style={styles.filterList}>
-                {productTypes.map((typeItem) => (
-                  <label key={typeItem.key} style={styles.filterItem}>
-                    <input
-                      type="checkbox"
-                      checked={selectedTypes.includes(typeItem.key)}
-                      onChange={() =>
-                        setSelectedTypes((prev) =>
-                          prev.includes(typeItem.key)
-                            ? prev.filter((t) => t !== typeItem.key)
-                            : [...prev, typeItem.key]
-                        )
-                      }
-                    />
-                    <span>{typeItem.label}</span>
-                  </label>
-                ))}
-              </div>
-              <button
-                type="button"
-                style={styles.mobileFilterCloseBtn}
-                onClick={() => setMobileFiltersOpen(false)}
-              >
-                CLOSE
-              </button>
-            </aside>
-          </div>
-        ) : null}
 
-      </div>
+            <div style={styles.gridWrap}>
+              <ProductGrid
+                products={filteredProducts}
+                loading={loadingProducts}
+                cart={cart}
+                viewMode={resolvedGridView}
+                contained
+                canEditProducts={isAdmin && (editMode || adminAllProductsMode)}
+                onAdd={addToCart}
+                onRemove={removeFromCart}
+                onOpenProduct={openProduct}
+                onEditProduct={openEditProduct}
+                onQuickStatusChange={updateProductStatus}
+                formatMoney={formatMoney}
+              />
+            </div>
+          </div>
+
+          {isMobileViewport ? (
+            <button
+              type="button"
+              style={{
+                ...styles.mobileFilterFab,
+                ...(selectedTypes.length > 0 ? styles.mobileFilterFabActive : null),
+              }}
+              onClick={() => setMobileFiltersOpen((v) => !v)}
+              aria-label="Open filters"
+              title="Filters"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path
+                  d="M4 7h16M7 12h10M10 17h4"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {selectedTypes.length > 0 ? (
+                <span style={styles.mobileFilterBadge}>{selectedTypes.length}</span>
+              ) : null}
+            </button>
+          ) : null}
+          {isMobileViewport && mobileFiltersOpen ? (
+            <div
+              style={styles.mobileFilterModalBackdrop}
+              onClick={() => setMobileFiltersOpen(false)}
+            >
+              <aside
+                className="tp-sheet-slide-up"
+                style={styles.mobileFilterModal}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isAdmin && adminAllProductsMode ? (
+                  <button
+                    type="button"
+                    style={styles.createBtn}
+                    onClick={() => void createProduct()}
+                  >
+                    CREATE
+                  </button>
+                ) : null}
+                <div style={styles.filterTitle}>FILTERS</div>
+                <div style={styles.filterActions}>
+                  <button
+                    type="button"
+                    style={styles.filterActionBtn}
+                    onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.filterActionBtn}
+                    onClick={() => setSelectedTypes([])}
+                  >
+                    None
+                  </button>
+                </div>
+                <div style={styles.filterList}>
+                  {productTypes.map((typeItem) => (
+                    <label key={typeItem.key} style={styles.filterItem}>
+                      <input
+                        type="checkbox"
+                        checked={selectedTypes.includes(typeItem.key)}
+                        onChange={() =>
+                          setSelectedTypes((prev) =>
+                            prev.includes(typeItem.key)
+                              ? prev.filter((t) => t !== typeItem.key)
+                              : [...prev, typeItem.key]
+                          )
+                        }
+                      />
+                      <span>{typeItem.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  style={styles.mobileFilterCloseBtn}
+                  onClick={() => setMobileFiltersOpen(false)}
+                >
+                  CLOSE
+                </button>
+              </aside>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Product drawer */}
       <ProductDrawer
@@ -1653,7 +1782,6 @@ React.useEffect(() => {
         onAdd={addToCart}
         onRemove={removeFromCart}
         formatMoney={formatMoney}
-        backgroundStyle={mainZoneStyle}
       />
 
       <ProductEditorDrawer
@@ -1661,9 +1789,29 @@ React.useEffect(() => {
         topOffset={topOffset}
         product={selectedProduct}
         images={selectedProductImages}
-        backgroundStyle={mainZoneStyle}
         onClose={closeEditor}
-        onSaved={loadCatalog}
+        onSaved={async () => {
+          await loadCatalog();
+          if (!selectedId) return;
+          try {
+            const refreshedImages = await fetchProductImages([selectedId]);
+            setProductImagesById((prev) => ({ ...prev, [selectedId]: refreshedImages }));
+            setProducts((prev) =>
+              prev.map((prod) => {
+                if (String(prod.id) !== String(selectedId)) return prod;
+                const images = refreshedImages
+                  .slice()
+                  .sort((a, b) => a.sort_order - b.sort_order);
+                const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
+                const firstImage = images[0]?.url ?? null;
+                const ownThumb = prod.thumbnail_url?.trim() || null;
+                return { ...prod, thumbnail_url: ownThumb ?? orderOne ?? firstImage };
+              })
+            );
+          } catch (e) {
+            console.error("[page] refresh product images failed", e);
+          }
+        }}
         onDeleted={async () => {
           await loadCatalog();
           setPanel(null);
@@ -1695,7 +1843,6 @@ React.useEffect(() => {
         onAddItem={addToCart}
         onRemoveItem={removeFromCart}
         formatMoney={formatMoney}
-        backgroundStyle={mainZoneStyle}
       />
 
       {/* Cart drawer */}
@@ -1709,7 +1856,6 @@ React.useEffect(() => {
         onRemove={removeFromCart}
         onCheckout={openCheckout}
         formatMoney={formatMoney}
-        backgroundStyle={mainZoneStyle}
       />
 
       <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
@@ -1718,7 +1864,6 @@ React.useEffect(() => {
         isOpen={detailsOpen}
         topOffset={topOffset}
         userId={authUserId}
-        backgroundStyle={mainZoneStyle}
         onClose={() => setDetailsOpen(false)}
       />
 
@@ -1731,9 +1876,9 @@ React.useEffect(() => {
         onSelectOrder={(id) => {
           setSelectedMyOrderId(id);
           setOrderDrawerSource("my");
+          setOrdersOpen(false);
           void loadAndSelectOrder(id);
         }}
-        backgroundStyle={mainZoneStyle}
         onClose={() => {
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
@@ -1751,9 +1896,9 @@ React.useEffect(() => {
         onSelectOrder={(id) => {
           setSelectedAllOrderId(id);
           setOrderDrawerSource("all");
+          setAllOrdersOpen(false);
           void loadAndSelectOrder(id);
         }}
-        backgroundStyle={mainZoneStyle}
         onClose={() => {
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
@@ -1774,10 +1919,17 @@ React.useEffect(() => {
         onChangeAmountPaid={handleOrderAmountPaidChange}
         onChangePaymentProof={handleOrderPaymentProofChange}
         onBack={() => {
+          const source = orderDrawerSource;
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
+          if (source === "my") {
+            setOrdersOpen(true);
+            return;
+          }
+          if (source === "all") {
+            setAllOrdersOpen(true);
+          }
         }}
-        backgroundStyle={mainZoneStyle}
       />
 
       <ZoneStyleModal
@@ -1790,7 +1942,8 @@ React.useEffect(() => {
         onSave={saveZoneStyle}
         onUploadFile={(file) => uploadUiAsset(file, "zone")}
         themeMode={themeMode}
-        onThemeModeChange={setThemeMode}
+        themeColors={themeColors}
+        onSaveThemeColors={saveThemeColors}
       />
 
       <LogoEditorModal
@@ -1802,7 +1955,6 @@ React.useEffect(() => {
         onSave={saveLogo}
         onUploadFile={(file) => uploadUiAsset(file, "logo")}
         themeMode={themeMode}
-        onThemeModeChange={setThemeMode}
       />
     </div>
   );
@@ -1811,7 +1963,7 @@ React.useEffect(() => {
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "black",
+    background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
   },
   headerWrap: {
@@ -1819,7 +1971,7 @@ const styles: Record<string, React.CSSProperties> = {
     top: 0,
     zIndex: 40,
     background: "black",
-    borderBottom: "1px solid var(--tp-border-color-soft)",
+    borderBottom: "none",
   },
   headerInner: {
     position: "relative",
@@ -1829,7 +1981,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     alignItems: "center",
     gap: 0,
-    padding: "8px 0",
+    padding: "28px 0 8px",
   },
   brandWrap: {
     display: "inline-flex",
@@ -1860,7 +2012,7 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.9,
   },
   brandLogo: {
-    height: 100,
+    height: 90,
     maxWidth: "min(68vw, 560px)",
     width: "auto",
     objectFit: "contain",
@@ -1922,10 +2074,10 @@ const styles: Record<string, React.CSSProperties> = {
     position: "sticky",
     top: 14,
     marginTop: 16,
-    border: "1px solid var(--tp-border-color)",
+    border: "none",
     borderRadius: 12,
     padding: 12,
-    background: "var(--tp-control-bg-soft)",
+    background: "transparent",
   },
   createBtn: {
     height: 34,
