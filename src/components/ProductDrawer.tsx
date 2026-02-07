@@ -199,13 +199,6 @@ export default function ProductDrawer({
                 <div style={styles.drawerName}>{product.long_name || product.name}</div>
 
                 <div style={styles.drawerDetailStack}>
-                  {product.country_of_origin ? (
-                    <div style={styles.detailRow}>
-                      <div style={styles.detailLabel}>Country of Origin</div>
-                      <div style={styles.detailValue}>{product.country_of_origin}</div>
-                    </div>
-                  ) : null}
-
                   {product.cut ? (
                     <div style={styles.detailRow}>
                       <div style={styles.detailLabel}>Cut</div>
@@ -213,18 +206,28 @@ export default function ProductDrawer({
                     </div>
                   ) : null}
 
-                  {product.state ? (
+                  {product.country_of_origin ? (
                     <div style={styles.detailRow}>
-                      <div style={styles.detailLabel}>State</div>
-                      <div style={styles.detailValue}>{product.state}</div>
+                      <div style={styles.detailLabel}>Country of Origin</div>
+                      <div style={styles.detailValue}>{product.country_of_origin}</div>
                     </div>
                   ) : null}
                 </div>
 
-                {product.temperature ? (
+                {(product.preparation || product.temperature) ? (
                   <div style={styles.detailBlock}>
-                    <div style={styles.detailLabel}>Temperature</div>
-                    <div style={styles.detailValue}>{product.temperature}</div>
+                    {product.preparation ? (
+                      <div style={styles.detailRow}>
+                        <div style={styles.detailLabel}>Preparation</div>
+                        <div style={styles.detailValue}>{product.preparation}</div>
+                      </div>
+                    ) : null}
+                    {product.temperature ? (
+                      <div style={styles.detailRow}>
+                        <div style={styles.detailLabel}>Temperature</div>
+                        <div style={styles.detailValue}>{product.temperature}</div>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -237,33 +240,34 @@ export default function ProductDrawer({
                   )}
                 </div>
 
-                <div style={styles.drawerPriceRow}>
-                  <div style={styles.drawerPrice}>₱ {formatMoney(product.selling_price)}</div>
-                  {formatSize(product) ? (
-                    <div style={styles.drawerFormat}>{formatSize(product)}</div>
-                  ) : null}
-                </div>
-
-                <div style={styles.drawerQtyRow}>
-                  <AppButton
-                    type="button"
-                    variant="ghost"
-                    style={styles.qtyBtn}
-                    onClick={() => productId && onRemove(productId)}
-                    disabled={!productId}
-                  >
-                    <span style={styles.qtyGlyph}>−</span>
-                  </AppButton>
-                  <div style={{ ...styles.qty, width: 40 }}>{qty}</div>
-                  <AppButton
-                    type="button"
-                    variant="ghost"
-                    style={styles.qtyBtn}
-                    onClick={() => productId && onAdd(productId)}
-                    disabled={!productId}
-                  >
-                    <span style={styles.qtyGlyph}>+</span>
-                  </AppButton>
+                <div style={styles.drawerPurchaseRow}>
+                  <div style={styles.drawerPriceGroup}>
+                    <div style={styles.drawerPrice}>₱ {formatMoney(product.selling_price)}</div>
+                    {formatSize(product) ? (
+                      <div style={styles.drawerFormat}>{formatSize(product)}</div>
+                    ) : null}
+                  </div>
+                  <div style={styles.drawerQtyRow}>
+                    <AppButton
+                      type="button"
+                      variant="ghost"
+                      style={styles.qtyBtn}
+                      onClick={() => productId && onRemove(productId)}
+                      disabled={!productId}
+                    >
+                      <span style={styles.qtyGlyph}>−</span>
+                    </AppButton>
+                    <div style={{ ...styles.qty, width: 40 }}>{qty}</div>
+                    <AppButton
+                      type="button"
+                      variant="ghost"
+                      style={styles.qtyBtn}
+                      onClick={() => productId && onAdd(productId)}
+                      disabled={!productId}
+                    >
+                      <span style={styles.qtyGlyph}>+</span>
+                    </AppButton>
+                  </div>
                 </div>
 
                 <div style={styles.drawerFooterHint}>
@@ -459,20 +463,26 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
   },
   detailLabel: {
-    fontSize: 15,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-    opacity: 0.7,
+    fontSize: 13,
+    letterSpacing: 0.2,
+    textTransform: "none",
+    opacity: 0.65,
   },
   detailValue: {
     fontSize: 16,
     color: "var(--tp-text-color)",
   },
-  drawerPriceRow: {
+  drawerPurchaseRow: {
     marginTop: 24,
     display: "flex",
+    alignItems: "center",
+    gap: 50,
+    flexWrap: "wrap",
+  },
+  drawerPriceGroup: {
+    display: "inline-flex",
     alignItems: "baseline",
-    gap: 14,
+    gap: 12,
   },
   drawerPrice: { fontSize: 18, color: "var(--tp-text-color)" },
   drawerFormat: { fontSize: 15, opacity: 0.8 },
@@ -495,7 +505,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   drawerQtyRow: {
-    marginTop: 14,
     display: "flex",
     alignItems: "center",
     gap: 10,
@@ -521,7 +530,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--tp-text-color)",
   },
   drawerFooterHint: {
-    marginTop: 18,
+    marginTop: 38,
     color: "var(--tp-text-color)",
     opacity: 0.58,
     fontSize: 15,

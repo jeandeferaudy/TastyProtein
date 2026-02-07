@@ -19,6 +19,13 @@ export type ThemeColorsDraft = {
   background_color?: string;
 };
 
+export type BannerDraft = {
+  id: string;
+  image_url: string;
+  link_url: string;
+  sort_order: number;
+};
+
 type Props = {
   isOpen: boolean;
   zoneLabel: string;
@@ -32,6 +39,9 @@ type Props = {
   onThemeModeChange?: (next: "dark" | "light") => void;
   themeColors?: ThemeColorsDraft;
   onSaveThemeColors?: (next: ThemeColorsDraft) => Promise<boolean> | boolean;
+  banners?: BannerDraft[];
+  onSaveBanners?: (next: BannerDraft[]) => Promise<boolean> | boolean;
+  onUploadBanner?: (file: File) => Promise<string>;
 };
 
 export default function ZoneStyleModal({
@@ -47,10 +57,16 @@ export default function ZoneStyleModal({
   onThemeModeChange,
   themeColors,
   onSaveThemeColors,
+  banners,
+  onSaveBanners,
+  onUploadBanner,
 }: Props) {
   const [draft, setDraft] = React.useState<ZoneStyleDraft>(initial);
   const [colorsDraft, setColorsDraft] = React.useState<ThemeColorsDraft | null>(
     themeColors ? { ...themeColors } : null
+  );
+  const [bannerDrafts, setBannerDrafts] = React.useState<BannerDraft[]>(
+    banners ? banners.map((b) => ({ ...b })) : []
   );
   const [localError, setLocalError] = React.useState<string>("");
 
@@ -61,13 +77,30 @@ export default function ZoneStyleModal({
       : "#000000";
   }, []);
 
+  const areThemeColorsEqual = React.useCallback(
+    (a: ThemeColorsDraft | null, b: ThemeColorsDraft | undefined) => {
+      if (!a || !b) return false;
+      return (
+        a.accent_color === b.accent_color &&
+        a.text_color === b.text_color &&
+        a.line_color === b.line_color &&
+        a.button_border_color === b.button_border_color &&
+        a.button_bg_color === b.button_bg_color &&
+        a.checkbox_color === b.checkbox_color &&
+        String(a.background_color ?? "") === String(b.background_color ?? "")
+      );
+    },
+    []
+  );
+
   React.useEffect(() => {
     if (isOpen) {
       setDraft(initial);
       setColorsDraft(themeColors ? { ...themeColors } : null);
+      setBannerDrafts(banners ? banners.map((b) => ({ ...b })) : []);
       setLocalError("");
     }
-  }, [initial, isOpen, themeColors]);
+  }, [banners, initial, isOpen, themeColors]);
 
   if (!isOpen) return null;
   const isLight = themeMode === "light";
@@ -403,6 +436,130 @@ export default function ZoneStyleModal({
             </>
           ) : null}
 
+          {onSaveBanners ? (
+            <>
+              <div style={styles.sectionDivider} />
+              <div style={styles.sectionTitle}>Banners</div>
+              <div style={styles.bannerHint}>
+                Carousel appears below the navbar when at least one banner image is set.
+              </div>
+              <div style={styles.bannerList}>
+                {bannerDrafts.map((banner, index) => (
+                  <div key={banner.id} style={styles.bannerCard}>
+                    <div style={styles.bannerRow}>
+                      <label style={styles.bannerLabel}>Image URL</label>
+                      <input
+                        type="text"
+                        value={banner.image_url}
+                        onChange={(e) =>
+                          setBannerDrafts((prev) =>
+                            prev.map((item, idx) =>
+                              idx === index ? { ...item, image_url: e.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="https://..."
+                        style={styles.input}
+                      />
+                    </div>
+                    {onUploadBanner ? (
+                      <div style={styles.uploadRow}>
+                        <label style={styles.uploadBtn}>
+                          Upload banner
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              try {
+                                setLocalError("");
+                                const url = await onUploadBanner(file);
+                                setBannerDrafts((prev) =>
+                                  prev.map((item, idx) =>
+                                    idx === index ? { ...item, image_url: url } : item
+                                  )
+                                );
+                              } catch (err) {
+                                setLocalError(
+                                  err instanceof Error ? err.message : "Upload failed."
+                                );
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                    <div style={styles.bannerRow}>
+                      <label style={styles.bannerLabel}>Link URL</label>
+                      <input
+                        type="text"
+                        value={banner.link_url}
+                        onChange={(e) =>
+                          setBannerDrafts((prev) =>
+                            prev.map((item, idx) =>
+                              idx === index ? { ...item, link_url: e.target.value } : item
+                            )
+                          )
+                        }
+                        placeholder="/shop"
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.bannerRow}>
+                      <label style={styles.bannerLabel}>Order</label>
+                      <input
+                        type="number"
+                        value={Number.isFinite(banner.sort_order) ? banner.sort_order : 0}
+                        onChange={(e) =>
+                          setBannerDrafts((prev) =>
+                            prev.map((item, idx) =>
+                              idx === index
+                                ? { ...item, sort_order: Number(e.target.value) }
+                                : item
+                            )
+                          )
+                        }
+                        style={styles.input}
+                      />
+                    </div>
+                    <div style={styles.bannerActions}>
+                      <AppButton
+                        variant="ghost"
+                        style={styles.bannerRemoveBtn}
+                        onClick={() =>
+                          setBannerDrafts((prev) =>
+                            prev.filter((_, idx) => idx !== index)
+                          )
+                        }
+                      >
+                        REMOVE
+                      </AppButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <AppButton
+                variant="ghost"
+                style={styles.addBannerBtn}
+                onClick={() =>
+                  setBannerDrafts((prev) => [
+                    ...prev,
+                    {
+                      id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                      image_url: "",
+                      link_url: "",
+                      sort_order: prev.length ? (prev[prev.length - 1].sort_order ?? 0) + 1 : 0,
+                    },
+                  ])
+                }
+              >
+                ADD BANNER
+              </AppButton>
+            </>
+          ) : null}
+
           {localError ? <div style={styles.error}>{localError}</div> : null}
           {error ? <div style={styles.error}>{error}</div> : null}
         </div>
@@ -422,9 +579,21 @@ export default function ZoneStyleModal({
               } catch {
                 ok = false;
               }
-              if (colorsDraft && onSaveThemeColors) {
+              if (
+                colorsDraft &&
+                onSaveThemeColors &&
+                !areThemeColorsEqual(colorsDraft, themeColors)
+              ) {
                 try {
                   okColors = await onSaveThemeColors(colorsDraft);
+                } catch {
+                  okColors = false;
+                }
+              }
+              if (onSaveBanners) {
+                try {
+                  const okBanners = await onSaveBanners(bannerDrafts);
+                  if (!okBanners) okColors = false;
                 } catch {
                   okColors = false;
                 }
@@ -584,6 +753,51 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     letterSpacing: 1,
     marginBottom: 10,
+  },
+  bannerHint: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginBottom: 10,
+  },
+  bannerList: {
+    display: "grid",
+    gap: 12,
+  },
+  bannerCard: {
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: 10,
+    padding: 10,
+    display: "grid",
+    gap: 8,
+  },
+  bannerRow: {
+    display: "grid",
+    gap: 6,
+  },
+  bannerLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    opacity: 0.75,
+  },
+  bannerActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+  bannerRemoveBtn: {
+    height: 30,
+    borderRadius: 6,
+    padding: "0 10px",
+    fontSize: 12,
+    letterSpacing: 0.8,
+  },
+  addBannerBtn: {
+    height: 34,
+    borderRadius: 8,
+    padding: "0 12px",
+    fontSize: 13,
+    letterSpacing: 0.9,
+    marginTop: 10,
   },
   colorGrid: {
     display: "grid",

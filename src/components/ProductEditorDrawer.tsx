@@ -361,7 +361,7 @@ export default function ProductEditorDrawer({
         description: activeDraft.description || null,
         type: activeDraft.type || null,
         cut: activeDraft.cut || null,
-        preparation: activeDraft.preparation || null,
+        preparationa: activeDraft.preparation || null,
         packaging: activeDraft.packaging || null,
         size: computedSizeText || null,
         size_g: sizeG,
@@ -711,6 +711,13 @@ export default function ProductEditorDrawer({
                 style={styles.input}
                 value={draft.selling_price}
                 onChange={(e) => setField("selling_price", e.target.value)}
+                onBlur={handleAutoSave}
+              />
+              <label style={styles.label}>Packaging</label>
+              <input
+                style={styles.input}
+                value={draft.packaging}
+                onChange={(e) => setField("packaging", e.target.value)}
                 onBlur={handleAutoSave}
               />
               <label style={styles.label}>Temperature</label>

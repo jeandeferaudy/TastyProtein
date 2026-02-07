@@ -288,14 +288,12 @@ export default function ProductCard({
         {imageUrl ? (
           <div style={styles.imgFrame}>
             <img src={imageUrl} alt={longName} style={styles.imgPhoto} loading="lazy" />
-            <div style={styles.imgFade} aria-hidden />
           </div>
         ) : (
           <div style={styles.imgFrame} aria-hidden>
             <div style={styles.img}>
               <LogoPlaceholder style={styles.logoPlaceholder} />
             </div>
-            <div style={styles.imgFade} aria-hidden />
           </div>
         )}
 
@@ -435,7 +433,7 @@ const styles: Record<string, React.CSSProperties> = {
   img: {
     width: "100%",
     aspectRatio: "1 / 1",
-    borderRadius: 12,
+    borderRadius: "12px 12px 0 0",
     border: "none",
     background: "transparent",
     marginBottom: 0,
@@ -445,7 +443,7 @@ const styles: Record<string, React.CSSProperties> = {
   imgFrame: {
     width: "100%",
     aspectRatio: "1 / 1",
-    borderRadius: 12,
+    borderRadius: "12px 12px 0 0",
     overflow: "hidden",
     position: "relative",
     marginBottom: 12,
@@ -454,24 +452,11 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     aspectRatio: "1 / 1",
     objectFit: "cover",
-    borderRadius: 12,
+    borderRadius: "12px 12px 0 0",
     marginBottom: 0,
     border: "1px solid transparent",
     background: "#0d0d0d",
     display: "block",
-  },
-  imgFade: {
-    position: "absolute",
-    inset: 0,
-    pointerEvents: "none",
-    backdropFilter: "blur(6px)",
-    WebkitBackdropFilter: "blur(6px)",
-    background:
-      "linear-gradient(to right, rgba(0,0,0,0.25), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,0.25)), linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,0.25))",
-    maskImage:
-      "linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1)), linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1))",
-    WebkitMaskImage:
-      "linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1)), linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1))",
   },
   title: {
     fontSize: 16,

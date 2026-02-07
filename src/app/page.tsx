@@ -13,7 +13,11 @@ import AuthModal from "@/components/AuthModal";
 import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
-import ZoneStyleModal, { type ZoneStyleDraft, type ThemeColorsDraft } from "@/components/ZoneStyleModal";
+import ZoneStyleModal, {
+  type ZoneStyleDraft,
+  type ThemeColorsDraft,
+  type BannerDraft,
+} from "@/components/ZoneStyleModal";
 import LogoEditorModal from "@/components/LogoEditorModal";
 
 import { formatMoney } from "@/lib/money";
@@ -80,6 +84,13 @@ type BrandingRow = {
 
 type ThemeColorsRow = ThemeColorsDraft & {
   mode: "dark" | "light";
+};
+
+type BannerRow = {
+  id: string;
+  image_url: string | null;
+  link_url: string | null;
+  sort_order: number | null;
 };
 
 function SettingsIcon({ size = 16 }: { size?: number }) {
@@ -196,6 +207,8 @@ export default function Page() {
   const [logoEditorSaving, setLogoEditorSaving] = React.useState<boolean>(false);
   const [logoEditorError, setLogoEditorError] = React.useState<string>("");
   const [isMainBgReady, setIsMainBgReady] = React.useState<boolean>(false);
+  const [banners, setBanners] = React.useState<BannerRow[]>([]);
+  const [bannerIndex, setBannerIndex] = React.useState(0);
   const DEFAULT_THEME_COLORS_BY_MODE: Record<"dark" | "light", ThemeColorsDraft> = React.useMemo(
     () => ({
       dark: {
@@ -222,6 +235,42 @@ export default function Page() {
   const [themeColorsByMode, setThemeColorsByMode] = React.useState<
     Record<"dark" | "light", ThemeColorsDraft>
   >(DEFAULT_THEME_COLORS_BY_MODE);
+
+  const activeBanners = React.useMemo(
+    () =>
+      banners
+        .filter((b) => String(b.image_url ?? "").trim())
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    [banners]
+  );
+
+  const handlePrevBanner = React.useCallback(() => {
+    if (activeBanners.length <= 1) return;
+    setBannerIndex((prev) => (prev - 1 + activeBanners.length) % activeBanners.length);
+  }, [activeBanners.length]);
+
+  const handleNextBanner = React.useCallback(() => {
+    if (activeBanners.length <= 1) return;
+    setBannerIndex((prev) => (prev + 1) % activeBanners.length);
+  }, [activeBanners.length]);
+
+  React.useEffect(() => {
+    if (activeBanners.length === 0) {
+      setBannerIndex(0);
+      return;
+    }
+    if (bannerIndex >= activeBanners.length) {
+      setBannerIndex(0);
+    }
+  }, [activeBanners.length, bannerIndex]);
+
+  React.useEffect(() => {
+    if (activeBanners.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setBannerIndex((prev) => (prev + 1) % activeBanners.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [activeBanners.length]);
 
   // ----------------------------
   // Panels
@@ -263,6 +312,8 @@ export default function Page() {
   const resolvedGridView: "list" | "4" | "6" = gridView;
   const desktopNavLeftWidth = 252;
   const desktopNavGap = 10;
+  const pendingRouteRef = React.useRef<{ path: string; search: string } | null>(null);
+  const isApplyingRouteRef = React.useRef(false);
   const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
     setCustomer(next);
   }, []);
@@ -314,6 +365,10 @@ export default function Page() {
 
   React.useEffect(() => {
     document.documentElement.setAttribute("data-tp-mode", "dark");
+  }, []);
+
+  React.useEffect(() => {
+    setGridView("4");
   }, []);
 
   // ----------------------------
@@ -532,6 +587,18 @@ export default function Page() {
     loadThemeColors();
   }, [DEFAULT_THEME_COLORS_BY_MODE]);
 
+  React.useEffect(() => {
+    const loadBanners = async () => {
+      const { data, error } = await supabase
+        .from("ui_banners")
+        .select("id,image_url,link_url,sort_order")
+        .order("sort_order", { ascending: true, nullsFirst: false });
+      if (error || !data) return;
+      setBanners((data ?? []) as BannerRow[]);
+    };
+    loadBanners();
+  }, []);
+
   const hexToRgba = React.useCallback((value: string, alpha: number) => {
     const raw = String(value || "").trim();
     if (!raw) return `rgba(255,255,255,${alpha})`;
@@ -546,6 +613,7 @@ export default function Page() {
   }, []);
 
   const themeColors = themeColorsByMode[themeMode];
+  const activeBanner = activeBanners[bannerIndex] ?? null;
 
   React.useEffect(() => {
     const root = document.documentElement;
@@ -622,39 +690,6 @@ export default function Page() {
     };
   }, []);
 
-  const logout = React.useCallback(async () => {
-    await supabase.auth.signOut();
-    setAuthLabel(null);
-    setAuthUserId(null);
-    setAuthEmail("");
-    setAuthPhone("");
-    setIsAdmin(false);
-    setEditMode(false);
-    setAdminAllProductsMode(false);
-    setDetailsOpen(false);
-    setOrdersOpen(false);
-    setAllOrdersOpen(false);
-    setMyOrders([]);
-    setAllOrders([]);
-    setSelectedMyOrderId(null);
-    setSelectedAllOrderId(null);
-    setOrderDrawerSource(null);
-    setSelectedOrderDetail(null);
-    setProfileHasAddress(false);
-    setSaveAddressToProfile(false);
-    setCreateAccountFromDetails(false);
-    setProfileAddress({
-      attention_to: "",
-      line1: "",
-      line2: "",
-      barangay: "",
-      city: "",
-      province: "",
-      postal_code: "",
-      country: "Philippines",
-    });
-  }, []);
-
   React.useEffect(() => {
     if (!authUserId) return;
     const fillCustomer = async () => {
@@ -705,6 +740,10 @@ export default function Page() {
         country: prev.country || String(data?.country ?? "").trim() || "Philippines",
         notes: prev.notes || deliveryNote,
       }));
+
+      if (firstName) {
+        setAuthLabel(firstName);
+      }
     };
     void fillCustomer();
   }, [authUserId, authEmail, authPhone]);
@@ -765,7 +804,7 @@ export default function Page() {
   );
 
   const uploadUiAsset = React.useCallback(
-    async (file: File, kind: "zone" | "logo"): Promise<string> => {
+    async (file: File, kind: "zone" | "logo" | "banner"): Promise<string> => {
       const extension = file.name.includes(".")
         ? file.name.split(".").pop()?.toLowerCase() ?? "jpg"
         : "jpg";
@@ -809,6 +848,57 @@ export default function Page() {
       setLogoEditorSaving(false);
     }
   }, [themeMode]);
+
+  const saveBanners = React.useCallback(async (next: BannerDraft[]): Promise<boolean> => {
+    try {
+      const cleaned = next
+        .map((banner, index) => ({
+          id: banner.id,
+          image_url: String(banner.image_url ?? "").trim(),
+          link_url: String(banner.link_url ?? "").trim(),
+          sort_order: Number.isFinite(banner.sort_order)
+            ? banner.sort_order
+            : index,
+        }))
+        .filter((banner) => banner.image_url);
+
+      const { error: deleteError } = await supabase
+        .from("ui_banners")
+        .delete()
+        .not("id", "is", null);
+      if (deleteError) throw deleteError;
+
+      if (cleaned.length === 0) {
+        setBanners([]);
+        return true;
+      }
+
+      const payload = cleaned.map((banner) => {
+        const base = {
+          image_url: banner.image_url,
+          link_url: banner.link_url || null,
+          sort_order: banner.sort_order,
+        };
+        if (banner.id && !banner.id.startsWith("tmp-")) {
+          return { id: banner.id, ...base };
+        }
+        return base;
+      });
+
+      const { data, error } = await supabase
+        .from("ui_banners")
+        .insert(payload)
+        .select("id,image_url,link_url,sort_order");
+      if (error) throw error;
+      setBanners((data ?? []) as BannerRow[]);
+      return true;
+    } catch (e: unknown) {
+      const message = formatSupabaseError(e, "Failed to save banners.");
+      setZoneEditorError(message);
+      console.error("[banners] save failed", e);
+      return false;
+    }
+  }, [formatSupabaseError]);
 
   const saveThemeColors = React.useCallback(
     async (next: ThemeColorsDraft): Promise<boolean> => {
@@ -1080,16 +1170,62 @@ React.useEffect(() => {
     el.scrollTo({ top: 0, behavior: "smooth" });
   }, [closePrimaryDrawers]);
 
-  const openAllProductsView = React.useCallback(() => {
+  const logout = React.useCallback(async () => {
+    await supabase.auth.signOut();
+    setAuthLabel(null);
+    setAuthUserId(null);
+    setAuthEmail("");
+    setAuthPhone("");
+    setIsAdmin(false);
+    setEditMode(false);
+    setAdminAllProductsMode(false);
+    setDetailsOpen(false);
+    setOrdersOpen(false);
+    setAllOrdersOpen(false);
+    setMyOrders([]);
+    setAllOrders([]);
+    setSelectedMyOrderId(null);
+    setSelectedAllOrderId(null);
+    setOrderDrawerSource(null);
+    setSelectedOrderDetail(null);
+    setProfileHasAddress(false);
+    setSaveAddressToProfile(false);
+    setCreateAccountFromDetails(false);
+    setCustomer(blankCustomer());
+    setPaymentFile(null);
+    setProfileAddress({
+      attention_to: "",
+      line1: "",
+      line2: "",
+      barangay: "",
+      city: "",
+      province: "",
+      postal_code: "",
+      country: "Philippines",
+    });
+    setPanel(null);
+    setCartOpen(false);
+    setSelectedId(null);
+    setEditorReturnToProduct(false);
+    scrollToProducts();
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/shop");
+    }
+  }, [blankCustomer, scrollToProducts]);
+
+  const openAllProductsView = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     if (!isAdmin) return;
     closePrimaryDrawers();
     setCartOpen(false);
     setAdminAllProductsMode(true);
     const el = listScrollRef.current;
     if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/allproducts");
+    }
   }, [closePrimaryDrawers, isAdmin]);
 
-  const openProduct = React.useCallback((id: string) => {
+  const openProduct = React.useCallback((id: string, opts?: { skipNavigate?: boolean }) => {
     listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
     setSelectedId(id);
     setDetailsOpen(false);
@@ -1098,10 +1234,14 @@ React.useEffect(() => {
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
     setPanel("product");
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      const params = new URLSearchParams({ id: String(id) });
+      window.history.pushState({}, "", `/shop/product?${params.toString()}`);
+    }
   }, []);
 
   const openEditProduct = React.useCallback(
-    (id: string) => {
+    (id: string, opts?: { skipNavigate?: boolean }) => {
       if (!isAdmin) return;
       listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
       setEditorReturnToProduct(panel === "product");
@@ -1112,6 +1252,10 @@ React.useEffect(() => {
       setOrderDrawerSource(null);
       setSelectedOrderDetail(null);
       setPanel("edit");
+      if (!opts?.skipNavigate && typeof window !== "undefined") {
+        const params = new URLSearchParams({ id: String(id) });
+        window.history.pushState({}, "", `/shop/product?${params.toString()}`);
+      }
     },
     [isAdmin, panel]
   );
@@ -1186,9 +1330,12 @@ React.useEffect(() => {
     closePrimaryDrawers();
     const el = listScrollRef.current;
     if (el) el.scrollTop = listScrollTopRef.current;
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/shop");
+    }
   }, [closePrimaryDrawers]);
 
-  const openCheckout = React.useCallback(() => {
+  const openCheckout = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadProfileForCheckout = async () => {
       if (!authUserId) {
         setProfileHasAddress(false);
@@ -1251,12 +1398,18 @@ React.useEffect(() => {
     setSelectedOrderDetail(null);
     void loadProfileForCheckout();
     setPanel("checkout");
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/checkout");
+    }
   }, [authEmail, authPhone, authUserId]);
 
-  const openProfileDrawer = React.useCallback(() => {
+  const openProfileDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     closePrimaryDrawers();
     setCartOpen(false);
     setDetailsOpen(true);
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/profile");
+    }
   }, [closePrimaryDrawers]);
 
   const loadAndSelectOrder = React.useCallback(async (orderId: string) => {
@@ -1370,7 +1523,7 @@ React.useEffect(() => {
     [loadAndSelectOrder, selectedOrderDetail?.id]
   );
 
-  const openMyOrdersDrawer = React.useCallback(() => {
+  const openMyOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadMyOrders = async () => {
       if (!authUserId) {
         setMyOrders([]);
@@ -1394,9 +1547,12 @@ React.useEffect(() => {
     setSelectedAllOrderId(null);
     void loadMyOrders();
     setOrdersOpen(true);
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/myorders");
+    }
   }, [authEmail, authPhone, authUserId, closePrimaryDrawers]);
 
-  const openAllOrdersDrawer = React.useCallback(() => {
+  const openAllOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadAllOrders = async () => {
       try {
         const rows = await fetchOrders({ all: true });
@@ -1411,7 +1567,150 @@ React.useEffect(() => {
     setSelectedAllOrderId(null);
     void loadAllOrders();
     setAllOrdersOpen(true);
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/allorders");
+    }
   }, [closePrimaryDrawers]);
+
+  const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    closePrimaryDrawers();
+    setCartOpen(true);
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/cart");
+    }
+  }, [closePrimaryDrawers]);
+
+  const openShop = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setAdminAllProductsMode(false);
+    scrollToProducts();
+    if (!opts?.skipNavigate && typeof window !== "undefined") {
+      window.history.pushState({}, "", "/shop");
+    }
+  }, [closePrimaryDrawers, scrollToProducts]);
+
+  const applyRouteFromLocation = React.useCallback(
+    (rawPath: string, rawSearch: string) => {
+      if (isApplyingRouteRef.current) return;
+      isApplyingRouteRef.current = true;
+      try {
+        const path = rawPath || "/shop";
+        const search = rawSearch || "";
+        const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+
+        const requireAuth = (next: { path: string; search: string }) => {
+          if (authUserId) return true;
+          pendingRouteRef.current = next;
+          setAuthOpen(true);
+          closePrimaryDrawers();
+          setCartOpen(false);
+          return false;
+        };
+
+        const requireAdmin = (next: { path: string; search: string }) => {
+          if (isAdmin) return true;
+          pendingRouteRef.current = null;
+          closePrimaryDrawers();
+          setCartOpen(false);
+          if (typeof window !== "undefined") {
+            window.history.replaceState({}, "", "/shop");
+          }
+          return false;
+        };
+
+        if (path === "/" || path === "/shop") {
+          openShop({ skipNavigate: true });
+          return;
+        }
+        if (path === "/shop/product") {
+          const id = params.get("id") || params.get("product");
+          if (id) {
+            openProduct(id, { skipNavigate: true });
+          } else {
+            openShop({ skipNavigate: true });
+          }
+          return;
+        }
+        if (path === "/cart") {
+          openCart({ skipNavigate: true });
+          return;
+        }
+        if (path === "/checkout") {
+          openCheckout({ skipNavigate: true });
+          return;
+        }
+        if (path === "/order") {
+          const id = params.get("id") || params.get("order");
+          if (!id) {
+            openShop({ skipNavigate: true });
+            return;
+          }
+          if (!requireAuth({ path, search })) return;
+          setOrderDrawerSource("my");
+          setOrdersOpen(false);
+          setAllOrdersOpen(false);
+          void loadAndSelectOrder(id);
+          return;
+        }
+        if (path === "/myorders") {
+          if (!requireAuth({ path, search })) return;
+          openMyOrdersDrawer({ skipNavigate: true });
+          return;
+        }
+        if (path === "/profile") {
+          if (!requireAuth({ path, search })) return;
+          openProfileDrawer({ skipNavigate: true });
+          return;
+        }
+        if (path === "/allorders") {
+          if (!requireAdmin({ path, search })) return;
+          openAllOrdersDrawer({ skipNavigate: true });
+          return;
+        }
+        if (path === "/allproducts") {
+          if (!requireAdmin({ path, search })) return;
+          openAllProductsView({ skipNavigate: true });
+          return;
+        }
+
+        openShop({ skipNavigate: true });
+      } finally {
+        isApplyingRouteRef.current = false;
+      }
+    },
+    [
+      authUserId,
+      closePrimaryDrawers,
+      isAdmin,
+      loadAndSelectOrder,
+      openAllOrdersDrawer,
+      openAllProductsView,
+      openCart,
+      openCheckout,
+      openMyOrdersDrawer,
+      openProduct,
+      openProfileDrawer,
+      openShop,
+    ]
+  );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => {
+      applyRouteFromLocation(window.location.pathname, window.location.search);
+    };
+    onPopState();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [applyRouteFromLocation]);
+
+  React.useEffect(() => {
+    if (!authUserId || !pendingRouteRef.current) return;
+    const next = pendingRouteRef.current;
+    pendingRouteRef.current = null;
+    applyRouteFromLocation(next.path, next.search);
+  }, [applyRouteFromLocation, authUserId]);
 
   const composeAddress = React.useCallback((draft: CustomerDraft) => {
     const d = draft as Record<string, unknown>;
@@ -1539,6 +1838,37 @@ React.useEffect(() => {
         .eq("id", orderId);
       if (statusError) {
         console.warn("[checkout] initial status update failed:", statusError.message);
+      }
+    }
+
+    if (orderId && customerEmail.trim()) {
+      try {
+        const { data: orderMeta } = await supabase
+          .from("orders")
+          .select("order_number")
+          .eq("id", orderId)
+          .maybeSingle();
+        const orderNumber = String(orderMeta?.order_number ?? "").trim();
+        const origin =
+          typeof window !== "undefined" ? window.location.origin : undefined;
+        const emailPayload = {
+          email: customerEmail.trim(),
+          name: customer.full_name?.trim() || null,
+          orderId,
+          orderNumber: orderNumber || null,
+          origin,
+        };
+        const response = await fetch("/api/send-order-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(emailPayload),
+        });
+        if (!response.ok) {
+          const details = await response.text();
+          console.warn("[checkout] email failed:", details);
+        }
+      } catch (err) {
+        console.warn("[checkout] email error:", err);
       }
     }
 
@@ -1682,13 +2012,10 @@ React.useEffect(() => {
           totalUnits={totalUnits}
           subtotal={subtotal}
           onOpenCart={() => {
-            setCartOpen(true);
+            openCart();
           }}
           onShop={() => {
-            closePrimaryDrawers();
-            setCartOpen(false);
-            setAdminAllProductsMode(false);
-            scrollToProducts();
+            openShop();
           }}
           gridView={resolvedGridView}
           onChangeGridView={setGridView}
@@ -1708,6 +2035,7 @@ React.useEffect(() => {
           formatMoney={formatMoney}
           searchStartOffset={isMobileViewport ? 0 : desktopNavLeftWidth}
           isMobile={isMobileViewport}
+          showSearch={!isPrimaryDrawerOpen && panel === null && !detailsOpen}
         />
       </div>
 
@@ -1721,7 +2049,52 @@ React.useEffect(() => {
             height: `calc(100vh - ${topOffset}px)`,
           }}
         >
-          {null}
+          {activeBanner && String(activeBanner.image_url ?? "").trim() ? (
+            <div style={styles.bannerWrap}>
+              <div style={styles.bannerRail}>
+                {activeBanners.length > 1 ? (
+                  <button
+                    type="button"
+                    style={styles.bannerNavBtn}
+                    onClick={handlePrevBanner}
+                    aria-label="Previous banner"
+                  >
+                    {"<"}
+                  </button>
+                ) : null}
+                <div style={styles.bannerFrame}>
+                  {activeBanner.link_url?.trim() ? (
+                    <a
+                      href={activeBanner.link_url.trim()}
+                      style={styles.bannerLink}
+                    >
+                      <img
+                        src={activeBanner.image_url ?? ""}
+                        alt="Promotion banner"
+                        style={styles.bannerImage}
+                      />
+                    </a>
+                  ) : (
+                    <img
+                      src={activeBanner.image_url ?? ""}
+                      alt="Promotion banner"
+                      style={styles.bannerImage}
+                    />
+                  )}
+                </div>
+                {activeBanners.length > 1 ? (
+                  <button
+                    type="button"
+                    style={styles.bannerNavBtn}
+                    onClick={handleNextBanner}
+                    aria-label="Next banner"
+                  >
+                    {">"}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div
             style={{
               ...styles.productsLayout,
@@ -1983,7 +2356,7 @@ React.useEffect(() => {
         items={cartItemsForDisplay}
         subtotal={subtotal}
         backgroundStyle={mainZoneStyle}
-        onClose={() => setCartOpen(false)}
+        onClose={() => openShop()}
         onOpenProduct={handleCartOpenProduct as (id: string) => void}
         onAdd={addToCart}
         onRemove={removeFromCart}
@@ -1998,6 +2371,9 @@ React.useEffect(() => {
         topOffset={topOffset}
         userId={authUserId}
         onClose={() => setDetailsOpen(false)}
+        onProfileSaved={(firstName) => {
+          if (firstName) setAuthLabel(firstName);
+        }}
       />
 
       <MyOrdersDrawer
@@ -2077,6 +2453,24 @@ React.useEffect(() => {
         themeMode={themeMode}
         themeColors={themeColors}
         onSaveThemeColors={saveThemeColors}
+        banners={
+          zoneEditorTarget === "main"
+            ? banners.map((banner, index) => ({
+                id: banner.id,
+                image_url: banner.image_url ?? "",
+                link_url: banner.link_url ?? "",
+                sort_order: Number.isFinite(banner.sort_order)
+                  ? (banner.sort_order as number)
+                  : index,
+              }))
+            : undefined
+        }
+        onSaveBanners={zoneEditorTarget === "main" ? saveBanners : undefined}
+        onUploadBanner={
+          zoneEditorTarget === "main"
+            ? (file) => uploadUiAsset(file, "banner")
+            : undefined
+        }
       />
 
       <LogoEditorModal
@@ -2212,6 +2606,47 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     zIndex: 10,
     paddingBottom: 20,
+  },
+  bannerWrap: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "center",
+    padding: "18px 0 8px",
+  },
+  bannerRail: {
+    width: "var(--tp-rail-width)",
+    display: "grid",
+    gridTemplateColumns: "auto 1fr auto",
+    alignItems: "center",
+    gap: 12,
+  },
+  bannerFrame: {
+    width: "100%",
+    height: 175,
+    borderRadius: 14,
+    overflow: "hidden",
+    border: "1px solid rgba(255,255,255,0.2)",
+  },
+  bannerLink: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+  },
+  bannerImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  bannerNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.35)",
+    background: "rgba(0,0,0,0.35)",
+    color: "#fff",
+    fontSize: 22,
+    cursor: "pointer",
   },
   mainZoneEditBtn: {
     position: "absolute",

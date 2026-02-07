@@ -10,6 +10,7 @@ type Props = {
   userId: string | null;
   backgroundStyle?: React.CSSProperties;
   onClose: () => void;
+  onProfileSaved?: (firstName: string) => void;
 };
 
 type Draft = {
@@ -48,6 +49,7 @@ export default function MyDetailsDrawer({
   userId,
   backgroundStyle,
   onClose,
+  onProfileSaved,
 }: Props) {
   const [draft, setDraft] = React.useState<Draft>(EMPTY_DRAFT);
   const [isWideDesktop, setIsWideDesktop] = React.useState(false);
@@ -180,6 +182,9 @@ export default function MyDetailsDrawer({
       setSaved(true);
       lastSavedRef.current = draftSnapshot;
       window.setTimeout(() => setSaved(false), 1200);
+      if (onProfileSaved) {
+        onProfileSaved(draft.first_name.trim());
+      }
     }
     setLoading(false);
   };

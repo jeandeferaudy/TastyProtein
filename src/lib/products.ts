@@ -34,9 +34,7 @@ export async function fetchProducts(options?: {
   const includeInactive = options?.includeInactive ?? false;
   let query = supabase
     .from("products")
-    .select(
-      "id,name,long_name,description,type,cut,preparation,packaging,size_g,size,temperature,country_of_origin,selling_price,thumbnail_url,keywords,status,sort"
-    )
+    .select("*")
     .order("sort", { ascending: true, nullsFirst: false });
 
   if (!includeInactive) {
@@ -48,7 +46,46 @@ export async function fetchProducts(options?: {
   if (error) throw error;
 
   // Strongly type the return
-  return (data ?? []) as DbProduct[];
+  return (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      id: String(r["id"]),
+      name: (r["name"] as string | null) ?? null,
+      long_name: (r["long_name"] as string | null) ?? null,
+      description: (r["description"] as string | null) ?? null,
+      type: (r["type"] as string | null) ?? null,
+      cut: (r["cut"] as string | null) ?? null,
+      preparation:
+        (r["preparation"] as string | null) ??
+        (r["preparationa"] as string | null) ??
+        null,
+      packaging: (r["packaging"] as string | null) ?? null,
+      size_g:
+        typeof r["size_g"] === "number"
+          ? (r["size_g"] as number)
+          : r["size_g"] == null
+            ? null
+            : Number(r["size_g"]),
+      size: (r["size"] as string | null) ?? null,
+      temperature: (r["temperature"] as string | null) ?? null,
+      country_of_origin: (r["country_of_origin"] as string | null) ?? null,
+      selling_price:
+        typeof r["selling_price"] === "number"
+          ? (r["selling_price"] as number)
+          : r["selling_price"] == null
+            ? null
+            : Number(r["selling_price"]),
+      thumbnail_url: (r["thumbnail_url"] as string | null) ?? null,
+      keywords: (r["keywords"] as string | null) ?? null,
+      status: (r["status"] as string | null) ?? null,
+      sort:
+        typeof r["sort"] === "number"
+          ? (r["sort"] as number)
+          : r["sort"] == null
+            ? null
+            : Number(r["sort"]),
+    } satisfies DbProduct;
+  });
 }
 
 export async function fetchActiveProducts(): Promise<DbProduct[]> {
