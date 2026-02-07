@@ -49,10 +49,14 @@ export default function AuthModal({ isOpen, onClose }: Props) {
     try {
       if (!email.trim()) throw new Error("Email is required.");
       if (!password.trim()) throw new Error("Password is required.");
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}${window.location.pathname}`
+          : process.env.NEXT_PUBLIC_SITE_URL;
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { emailRedirectTo: window.location.origin },
+        options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
       });
       if (error) throw error;
       setMsg("Account created. Check your email to confirm.");
