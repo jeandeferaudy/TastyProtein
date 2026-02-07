@@ -331,7 +331,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 40,
-    padding: "18px 0 12px",
+    padding: "18px 0 15px",
   },
   backBtn: {
     width: 68,
@@ -339,12 +339,16 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: 700,
     letterSpacing: 1,
+    border: "none",
+    background: "transparent",
+    justifyContent: "flex-start",
+    textAlign: "left",
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 900,
     letterSpacing: 2,
     color: "var(--tp-text-color)",
@@ -352,7 +356,7 @@ const styles: Record<string, React.CSSProperties> = {
   content: {
     flex: 1,
     overflowY: "auto",
-    padding: "8px 0 24px 108px",
+    padding: "8px 0 44px 108px",
   },
   card: {
     maxWidth: "min(1120px, 100%)",
@@ -381,14 +385,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   label: {
     display: "block",
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
     marginTop: 10,
     marginBottom: 6,
   },
   labelDesktop: {
     display: "block",
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
     marginTop: 0,
     marginBottom: 0,
@@ -401,7 +405,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "0 12px",
+    padding: "0 15px",
   },
   textarea: {
     width: "100%",
@@ -410,7 +414,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "10px 12px",
+    padding: "10px 15px",
     resize: "vertical",
   },
   footer: {
@@ -422,7 +426,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 54,
   },
   error: {
-    fontSize: 13,
+    fontSize: 15,
     color: "#ff9f9f",
     maxWidth: 420,
     marginBottom: 8,

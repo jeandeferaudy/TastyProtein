@@ -77,9 +77,9 @@ export default function ProductCard({
   const imageUrl = product.thumbnail_url?.trim() || "";
   const isCompactTile = viewMode === "6";
   const tileTitleStyle: React.CSSProperties =
-    isCompactTile ? { ...styles.title, fontSize: 14 } : styles.title;
+    isCompactTile ? { ...styles.title, fontSize: 15 } : styles.title;
   const tileMetaStyle: React.CSSProperties = isCompactTile
-    ? { ...styles.metaLabel, fontSize: 14 }
+    ? { ...styles.metaLabel, fontSize: 15 }
     : styles.metaLabel;
   const tilePriceStyle: React.CSSProperties = isCompactTile
     ? { ...styles.price, fontSize: 16 }
@@ -286,10 +286,16 @@ export default function ProductCard({
         aria-label={`Open ${longName}`}
       >
         {imageUrl ? (
-          <img src={imageUrl} alt={longName} style={styles.imgPhoto} loading="lazy" />
+          <div style={styles.imgFrame}>
+            <img src={imageUrl} alt={longName} style={styles.imgPhoto} loading="lazy" />
+            <div style={styles.imgFade} aria-hidden />
+          </div>
         ) : (
-          <div style={styles.img} aria-hidden>
-            <LogoPlaceholder style={styles.logoPlaceholder} />
+          <div style={styles.imgFrame} aria-hidden>
+            <div style={styles.img}>
+              <LogoPlaceholder style={styles.logoPlaceholder} />
+            </div>
+            <div style={styles.imgFade} aria-hidden />
           </div>
         )}
 
@@ -406,7 +412,7 @@ export default function ProductCard({
 const styles: Record<string, React.CSSProperties> = {
   card: {
     borderRadius: 18,
-    border: "1px solid var(--tp-border-color-soft)",
+    border: "1px solid rgba(255,255,255,0.4)",
     background: "var(--tp-surface-bg)",
     boxShadow: "none",
     overflow: "hidden",
@@ -430,8 +436,18 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     aspectRatio: "1 / 1",
     borderRadius: 12,
-    border: "1px dashed var(--tp-border-color)",
+    border: "none",
     background: "transparent",
+    marginBottom: 0,
+    position: "relative",
+    overflow: "hidden",
+  },
+  imgFrame: {
+    width: "100%",
+    aspectRatio: "1 / 1",
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
     marginBottom: 12,
   },
   imgPhoto: {
@@ -439,9 +455,23 @@ const styles: Record<string, React.CSSProperties> = {
     aspectRatio: "1 / 1",
     objectFit: "cover",
     borderRadius: 12,
-    marginBottom: 12,
-    border: "1px solid var(--tp-border-color-soft)",
+    marginBottom: 0,
+    border: "1px solid transparent",
     background: "#0d0d0d",
+    display: "block",
+  },
+  imgFade: {
+    position: "absolute",
+    inset: 0,
+    pointerEvents: "none",
+    backdropFilter: "blur(6px)",
+    WebkitBackdropFilter: "blur(6px)",
+    background:
+      "linear-gradient(to right, rgba(0,0,0,0.25), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,0.25)), linear-gradient(to bottom, rgba(0,0,0,0.25), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,0.25))",
+    maskImage:
+      "linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1)), linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1))",
+    WebkitMaskImage:
+      "linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1)), linear-gradient(to bottom, rgba(0,0,0,1), rgba(0,0,0,0) 20px, rgba(0,0,0,0) calc(100% - 20px), rgba(0,0,0,1))",
   },
   title: {
     fontSize: 16,
@@ -475,7 +505,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderTop: "none",
   },
   adminRow: {
-    padding: "0 12px 10px",
+    padding: "0 15px 10px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -513,7 +543,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   listCard: {
     borderRadius: 14,
-    border: "1px solid var(--tp-border-color-soft)",
+    border: "1px solid rgba(255,255,255,0.4)",
     background: "var(--tp-surface-bg)",
     display: "grid",
     gridTemplateColumns: "75px minmax(0, 1fr) auto",
@@ -525,7 +555,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   listCardMobile: {
     borderRadius: 14,
-    border: "1px solid var(--tp-border-color-soft)",
+    border: "1px solid rgba(255,255,255,0.4)",
     background: "var(--tp-surface-bg)",
     display: "grid",
     gridTemplateColumns: "75px minmax(0, 1fr)",
@@ -546,17 +576,17 @@ const styles: Record<string, React.CSSProperties> = {
     height: 75,
     objectFit: "cover",
     borderRadius: 10,
-    border: "1px solid var(--tp-border-color-soft)",
+    border: "1px solid transparent",
   },
   listImagePlaceholder: {
     width: 75,
     height: 75,
     borderRadius: 10,
-    border: "1px dashed var(--tp-border-color)",
+    border: "none",
     background: "transparent",
   },
   logoPlaceholder: {
-    opacity: 0.5,
+    opacity: 0.7,
   },
   listInfo: {
     minWidth: 0,
@@ -599,14 +629,14 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 2,
   },
   listMeta: {
-    fontSize: 14,
+    fontSize: 15,
     opacity: 0.82,
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
   },
   listMetaMobile: {
-    fontSize: 14,
+    fontSize: 15,
     opacity: 0.82,
     whiteSpace: "nowrap",
     overflow: "hidden",
@@ -670,7 +700,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 12,
     border: "1px solid var(--tp-border-color)",
     padding: "0 8px",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 0.7,
     background: "var(--tp-control-bg-soft)",
@@ -681,7 +711,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 34,
     minWidth: 92,
     borderRadius: 10,
-    fontSize: 12,
+    fontSize: 15,
     padding: "0 6px",
   },
   statusActive: {

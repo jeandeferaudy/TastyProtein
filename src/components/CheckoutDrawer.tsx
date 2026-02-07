@@ -606,7 +606,7 @@ export default function CheckoutDrawer({
       <div
         style={{
           ...styles.paymentInstructionRow,
-          ...(isMobileViewport ? { fontSize: 13, lineHeight: 1.3, marginBottom: 10 } : null),
+          ...(isMobileViewport ? { fontSize: 15, lineHeight: 1.3, marginBottom: 10 } : null),
         }}
       >
         Scan the QR code, complete your payment, take a screenshot, then upload it below.
@@ -1554,7 +1554,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 0,
-    padding: "18px 0 12px",
+    padding: "18px 0 15px",
     color: "var(--tp-text-color)",
   },
 
@@ -1565,20 +1565,24 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: TITLE_GAP,
     padding: 0,
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: 700,
     letterSpacing: 1,
+    border: "none",
+    background: "transparent",
+    justifyContent: "flex-start",
+    textAlign: "left",
   },
 
   topTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 900,
     letterSpacing: 2,
     marginRight: TITLE_GAP,
   },
 
   topSubtitle: {
-    fontSize: 13,
+    fontSize: 15,
     display: "flex",
     alignItems: "center",
     flexWrap: "wrap",
@@ -1613,7 +1617,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: 700,
     cursor: "pointer",
     padding: "0 clamp(10px, 4vw, 40px)",
@@ -1624,11 +1628,11 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 1,
   },
   topStepChipDone: {
-    color: "#3aaaf5",
+    color: "var(--tp-accent)",
   },
   stepCheck: {
-    color: "#3aaaf5",
-    fontSize: 14,
+    color: "var(--tp-accent)",
+    fontSize: 15,
     fontWeight: 900,
     lineHeight: 1,
   },
@@ -1643,7 +1647,7 @@ const styles: Record<string, React.CSSProperties> = {
   content: {
     flex: 1,
     overflowY: "hidden",
-    padding: `10px 24px 26px ${BACK_BTN_W + TITLE_GAP}px`,
+    padding: `10px 24px 46px ${BACK_BTN_W + TITLE_GAP}px`,
   },
 
   grid: {
@@ -1676,7 +1680,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 2,
     opacity: 0.85,
@@ -1700,8 +1704,8 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 8,
   },
   sectionHint: {
-    fontSize: 13,
-    color: "#3aaaf5",
+    fontSize: 15,
+    color: "var(--tp-accent)",
     fontWeight: 700,
     whiteSpace: "nowrap",
     lineHeight: 1.2,
@@ -1711,7 +1715,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignSelf: "baseline",
   },
   sectionDoneBox: {
-    color: "#3aaaf5",
+    color: "var(--tp-accent)",
     display: "inline-block",
     fontSize: 16,
     fontWeight: 900,
@@ -1719,7 +1723,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   sectionTitle2: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 2,
     opacity: 0.85,
@@ -1737,7 +1741,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
   },
   detailsSectionTitle: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 800,
     letterSpacing: 0.6,
     opacity: 0.9,
@@ -1767,14 +1771,14 @@ const styles: Record<string, React.CSSProperties> = {
 
   label: {
     display: "block",
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
     marginBottom: 6,
     marginTop: 10,
   },
   labelDesktop: {
     display: "block",
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
     marginBottom: 0,
     whiteSpace: "nowrap",
@@ -1805,7 +1809,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color-soft)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "0 12px",
+    padding: "0 15px",
     outline: "none",
   },
 
@@ -1816,7 +1820,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color-soft)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "9px 12px",
+    padding: "9px 15px",
     outline: "none",
     resize: "none",
     overflow: "hidden",
@@ -1833,7 +1837,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.9,
   },
   optInRowInline: {
@@ -1841,7 +1845,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.9,
   },
   expressControl: {
@@ -1861,7 +1865,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 8,
     minHeight: 34,
-    fontSize: 14,
+    fontSize: 15,
     opacity: 0.9,
   },
   profileLinkBtn: {
@@ -1869,7 +1873,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
     color: "var(--tp-text-color)",
     textDecoration: "underline",
-    fontSize: 13,
+    fontSize: 15,
     padding: 0,
     cursor: "pointer",
   },
@@ -1910,9 +1914,9 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "0 12px",
+    padding: "0 15px",
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
@@ -1927,9 +1931,9 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    padding: "0 12px",
+    padding: "0 15px",
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
@@ -1955,7 +1959,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
     color: "var(--tp-text-color)",
     opacity: 0.9,
-    fontSize: 14,
+    fontSize: 15,
     textAlign: "left",
     textDecoration: "underline",
     cursor: "pointer",
@@ -1982,7 +1986,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   helper: {
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.65,
     marginTop: 8,
   },
@@ -1991,12 +1995,12 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: 36,
     marginTop: 14,
-    padding: "0 12px",
+    padding: "0 15px",
     borderRadius: 8,
     border: "1px solid var(--tp-cta-border)",
     background: "var(--tp-cta-bg)",
     color: "var(--tp-cta-fg)",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
@@ -2010,7 +2014,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   reqHint: {
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.9,
     marginTop: 10,
     marginBottom: -12,
@@ -2024,13 +2028,13 @@ const styles: Record<string, React.CSSProperties> = {
   expressWarning: {
     marginTop: 8,
     color: "#ffb14a",
-    fontSize: 13,
+    fontSize: 15,
     lineHeight: 1.35,
   },
   inlineTimeWarn: {
     marginTop: 6,
     color: "#ffb14a",
-    fontSize: 12,
+    fontSize: 15,
     lineHeight: 1.2,
   },
 
@@ -2098,7 +2102,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "block",
   },
   summaryCollapsedHint: {
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.72,
     padding: "8px 0 4px",
     borderBottom: "1px solid var(--tp-border-color-soft)",
@@ -2108,7 +2112,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 10,
     paddingTop: 8,
     borderTop: "none",
-    fontSize: 12,
+    fontSize: 15,
     lineHeight: 1.35,
     opacity: 0.82,
     display: "grid",
@@ -2118,7 +2122,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 8,
     paddingBottom: 8,
     borderBottom: "none",
-    fontSize: 12,
+    fontSize: 15,
     lineHeight: 1.35,
     opacity: 0.85,
     display: "grid",
@@ -2131,7 +2135,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
   },
   summaryMiniTitle: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 1,
     opacity: 0.95,
@@ -2148,11 +2152,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   summaryLeft: {},
-  summaryName: { fontSize: 13, fontWeight: 800, marginBottom: 4 },
-  summaryMeta: { fontSize: 13, opacity: 0.75 },
-  summaryPerPiece: { fontSize: 13, opacity: 0.72, marginTop: 6 },
+  summaryName: { fontSize: 15, fontWeight: 800, marginBottom: 4 },
+  summaryMeta: { fontSize: 15, opacity: 0.75 },
+  summaryPerPiece: { fontSize: 15, opacity: 0.72, marginTop: 6 },
   summaryRight: { textAlign: "right" },
-  summaryLineTotal: { fontSize: 13, fontWeight: 900, marginBottom: 8 },
+  summaryLineTotal: { fontSize: 15, fontWeight: 900, marginBottom: 8 },
   summaryPmRow: {
     display: "grid",
     gridTemplateColumns: "32px 32px 32px",
@@ -2174,7 +2178,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
     transform: "translateY(-1px)",
   },
-  summaryQty: { fontSize: 13, fontWeight: 800, textAlign: "center" },
+  summaryQty: { fontSize: 15, fontWeight: 800, textAlign: "center" },
 
   summaryTotalRow: {
     display: "flex",
@@ -2189,7 +2193,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 2,
   },
   summaryItemsCountRow: {
-    fontSize: 12,
+    fontSize: 15,
     opacity: 0.86,
     marginTop: 4,
     marginBottom: 2,
@@ -2211,21 +2215,21 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 0,
   },
 
-  summaryTotalLabel: { fontSize: 13, opacity: 0.92, fontWeight: 900 },
-  summaryTotalValue: { fontSize: 14, fontWeight: 900 },
-  summaryMinorLabel: { fontSize: 14, fontWeight: 700, opacity: 0.8 },
-  summaryMinorValue: { fontSize: 14, fontWeight: 800 },
+  summaryTotalLabel: { fontSize: 15, opacity: 0.92, fontWeight: 900 },
+  summaryTotalValue: { fontSize: 15, fontWeight: 900 },
+  summaryMinorLabel: { fontSize: 15, fontWeight: 700, opacity: 0.8 },
+  summaryMinorValue: { fontSize: 15, fontWeight: 800 },
   freeTag: {
-    color: "#3aaaf5",
+    color: "var(--tp-accent)",
   },
   deliveryHint: {
     marginTop: 8,
-    fontSize: 13,
-    color: "#3aaaf5",
+    fontSize: 15,
+    color: "var(--tp-accent)",
   },
   deliveryHintWarn: {
     marginTop: 8,
-    fontSize: 13,
+    fontSize: 15,
     color: "#ffb14a",
   },
   datePickerWrap: {
@@ -2281,7 +2285,7 @@ const styles: Record<string, React.CSSProperties> = {
   qrLeft: {},
   qrRight: { display: "flex", flexDirection: "column", gap: 8 },
 
-  qrText: { fontSize: 14, opacity: 0.95, lineHeight: 1.25, fontWeight: 700 },
+  qrText: { fontSize: 15, opacity: 0.95, lineHeight: 1.25, fontWeight: 700 },
   qrAmount: { fontSize: 25, opacity: 1, fontWeight: 900, lineHeight: 1.1 },
   previewBackdrop: {
     position: "absolute",
@@ -2307,7 +2311,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
   },
   previewTitle: {
-    fontSize: 13,
+    fontSize: 15,
     letterSpacing: 1.3,
     fontWeight: 900,
   },
@@ -2315,8 +2319,8 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     minWidth: 88,
     borderRadius: 8,
-    padding: "0 12px",
-    fontSize: 13,
+    padding: "0 15px",
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
@@ -2346,7 +2350,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   successTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 1000 as any,
     marginBottom: 8,
   },
@@ -2358,10 +2362,11 @@ const styles: Record<string, React.CSSProperties> = {
 
   backToShopBtn: {
     borderRadius: 14,
-    border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg)",
+    border: "none",
+    background: "transparent",
     color: "var(--tp-text-color)",
-    padding: "12px 14px",
+    padding: "15px 15px",
+    fontSize: 16,
     fontWeight: 900,
     cursor: "pointer",
     width: "100%",

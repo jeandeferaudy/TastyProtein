@@ -49,11 +49,11 @@
 
 /* Softer checkbox tone on dark backgrounds */
 [data-tp-mode="dark"] input[type="checkbox"] {
-  accent-color: var(--tp-checkbox-color);
+  accent-color: var(--tp-accent);
 }
 
 [data-tp-mode="light"] input[type="checkbox"] {
-  accent-color: var(--tp-checkbox-color);
+  accent-color: var(--tp-accent);
 }
 
 html,

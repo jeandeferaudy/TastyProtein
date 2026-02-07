@@ -8,7 +8,8 @@ export type DbProduct = {
   description?: string | null;
   type?: string | null;
   cut?: string | null;
-  state?: string | null;
+  preparation?: string | null;
+  packaging?: string | null;
   size_g?: number | null;
   size: string | null;
   temperature: string | null;
@@ -34,7 +35,7 @@ export async function fetchProducts(options?: {
   let query = supabase
     .from("products")
     .select(
-      "id,name,long_name,description,type,cut,state,size_g,size,temperature,country_of_origin,selling_price,thumbnail_url,keywords,status,sort"
+      "id,name,long_name,description,type,cut,preparation,packaging,size_g,size,temperature,country_of_origin,selling_price,thumbnail_url,keywords,status,sort"
     )
     .order("sort", { ascending: true, nullsFirst: false });
 

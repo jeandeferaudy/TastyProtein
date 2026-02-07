@@ -195,6 +195,7 @@ export default function Page() {
   const [logoEditorOpen, setLogoEditorOpen] = React.useState<boolean>(false);
   const [logoEditorSaving, setLogoEditorSaving] = React.useState<boolean>(false);
   const [logoEditorError, setLogoEditorError] = React.useState<string>("");
+  const [isMainBgReady, setIsMainBgReady] = React.useState<boolean>(false);
   const DEFAULT_THEME_COLORS_BY_MODE: Record<"dark" | "light", ThemeColorsDraft> = React.useMemo(
     () => ({
       dark: {
@@ -260,8 +261,27 @@ export default function Page() {
   });
   const [paymentFile, setPaymentFile] = React.useState<File | null>(null);
   const resolvedGridView: "list" | "4" | "6" = gridView;
+  const desktopNavLeftWidth = 252;
+  const desktopNavGap = 10;
   const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
     setCustomer(next);
+  }, []);
+  const formatSupabaseError = React.useCallback((e: unknown, fallback: string) => {
+    if (!e || typeof e !== "object") return fallback;
+    const err = e as {
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      code?: unknown;
+    };
+    const message =
+      typeof err.message === "string" && err.message.trim()
+        ? err.message.trim()
+        : fallback;
+    const details = typeof err.details === "string" ? err.details : "";
+    const hint = typeof err.hint === "string" ? err.hint : "";
+    const code = typeof err.code === "string" ? `code:${err.code}` : "";
+    return [message, details, hint, code].filter(Boolean).join(" — ");
   }, []);
 
   // ----------------------------
@@ -464,12 +484,24 @@ export default function Page() {
 
   React.useEffect(() => {
     const loadThemeColors = async () => {
+      try {
+        const raw = window.localStorage.getItem("tp_theme_colors_by_mode");
+        if (raw) {
+          const cached = JSON.parse(raw) as Partial<Record<"dark" | "light", ThemeColorsDraft>>;
+          setThemeColorsByMode((prev) => ({
+            dark: { ...prev.dark, ...(cached.dark ?? {}) },
+            light: { ...prev.light, ...(cached.light ?? {}) },
+          }));
+        }
+      } catch {
+        // ignore storage errors
+      }
       const { data, error } = await supabase
         .from("ui_theme_colors")
         .select(
           "mode,accent_color,text_color,line_color,button_border_color,button_bg_color,checkbox_color,background_color"
         );
-      if (error || !data) return;
+      if (error || !data || data.length === 0) return;
       setThemeColorsByMode((prev) => {
         const next = {
           dark: { ...DEFAULT_THEME_COLORS_BY_MODE.dark },
@@ -684,7 +716,7 @@ export default function Page() {
   }, []);
 
   const saveZoneStyle = React.useCallback(
-    async (next: ZoneStyleDraft) => {
+    async (next: ZoneStyleDraft): Promise<boolean> => {
       setZoneEditorSaving(true);
       setZoneEditorError("");
       try {
@@ -710,7 +742,7 @@ export default function Page() {
           window.localStorage.setItem("tp_zone_styles_by_mode", JSON.stringify(updated));
           return updated;
         });
-        setZoneEditorOpen(false);
+        return true;
       } catch (e: unknown) {
         const message =
           typeof e === "object" && e && "message" in e
@@ -724,6 +756,7 @@ export default function Page() {
             : "";
         setZoneEditorError(details ? `${message} (${details})` : message);
         console.error("[zone-style] save failed", e);
+        return false;
       } finally {
         setZoneEditorSaving(false);
       }
@@ -777,18 +810,54 @@ export default function Page() {
     }
   }, [themeMode]);
 
-  const saveThemeColors = React.useCallback(async (next: ThemeColorsDraft) => {
-    try {
-      const payload = { mode: themeMode, ...next };
-      const { error } = await supabase
-        .from("ui_theme_colors")
-        .upsert(payload, { onConflict: "mode" });
-      if (error) throw error;
-      setThemeColorsByMode((prev) => ({ ...prev, [themeMode]: { ...prev[themeMode], ...next } }));
-    } catch (e) {
-      console.error("[theme-colors] save failed", e);
-    }
-  }, [themeMode]);
+  const saveThemeColors = React.useCallback(
+    async (next: ThemeColorsDraft): Promise<boolean> => {
+      const current = themeColorsByMode[themeMode];
+      const cleaned: ThemeColorsDraft = {
+        accent_color: String(next.accent_color || current.accent_color || "").trim(),
+        text_color: String(next.text_color || current.text_color || "").trim(),
+        line_color: String(next.line_color || current.line_color || "").trim(),
+        button_border_color: String(next.button_border_color || current.button_border_color || "").trim(),
+        button_bg_color: String(next.button_bg_color || current.button_bg_color || "").trim(),
+        checkbox_color: String(next.checkbox_color || current.checkbox_color || "").trim(),
+        background_color: String(next.background_color || current.background_color || "").trim(),
+      };
+
+      setThemeColorsByMode((prev) => {
+        const updated = { ...prev, [themeMode]: { ...prev[themeMode], ...cleaned } };
+        try {
+          window.localStorage.setItem("tp_theme_colors_by_mode", JSON.stringify(updated));
+        } catch {
+          // ignore storage errors
+        }
+        return updated;
+      });
+
+      try {
+        setZoneEditorError("");
+        const payload = { mode: themeMode, ...cleaned };
+        const { error: updateError, data: updatedRows } = await supabase
+          .from("ui_theme_colors")
+          .update(payload)
+          .eq("mode", themeMode)
+          .select("mode");
+        if (updateError) throw updateError;
+        if (!updatedRows || updatedRows.length === 0) {
+          const { error: insertError } = await supabase
+            .from("ui_theme_colors")
+            .insert(payload);
+          if (insertError) throw insertError;
+        }
+        return true;
+      } catch (e) {
+        const message = formatSupabaseError(e, "Failed to save theme colors.");
+        setZoneEditorError(message);
+        console.error("[theme-colors] save failed", e);
+        return false;
+      }
+    },
+    [formatSupabaseError, themeColorsByMode, themeMode]
+  );
 
   const headerZoneStyle = React.useMemo<React.CSSProperties>(() => {
     return { background: "transparent" };
@@ -822,6 +891,33 @@ export default function Page() {
     }
     return { background: cfg.bg_color || themeColors.background_color || "#000000" };
   }, [themeColors.background_color, themeMode, zoneStylesByMode]);
+
+  const mainBgImageUrl = React.useMemo(() => {
+    const cfg = zoneStylesByMode[themeMode].main;
+    if (cfg.bg_type !== "image") return "";
+    return cfg.bg_image_url.trim();
+  }, [themeMode, zoneStylesByMode]);
+
+  React.useEffect(() => {
+    if (!mainBgImageUrl) {
+      setIsMainBgReady(true);
+      return;
+    }
+    let cancelled = false;
+    setIsMainBgReady(false);
+    const img = new Image();
+    const finalize = () => {
+      if (!cancelled) setIsMainBgReady(true);
+    };
+    img.onload = finalize;
+    img.onerror = finalize;
+    img.src = mainBgImageUrl;
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [mainBgImageUrl]);
 
   const closePrimaryDrawers = React.useCallback(() => {
     setPanel(null);
@@ -1517,16 +1613,38 @@ React.useEffect(() => {
         ...(mainZoneStyle ?? null),
       }}
     >
+      <style>{`
+        @keyframes tp-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes tp-pulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
+        }
+      `}</style>
+      {!isMainBgReady ? (
+        <div style={styles.loaderWrap} aria-label="Loading">
+          <div style={styles.loaderSpinner} />
+          <div style={styles.loaderText}>Loading...</div>
+        </div>
+      ) : null}
+      <div
+        style={{
+          ...styles.pageInner,
+          opacity: isMainBgReady ? 1 : 0,
+          visibility: isMainBgReady ? "visible" : "hidden",
+          pointerEvents: isMainBgReady ? "auto" : "none",
+        }}
+      >
       {/* Header */}
       <div ref={headerRef} style={{ ...styles.headerWrap, ...headerZoneStyle }}>
         <div style={styles.headerInner}>
           {null}
           <div style={styles.brandWrap}>
             {(logoUrlsByMode[themeMode] ?? "").trim() ? (
-              <img src={(logoUrlsByMode[themeMode] ?? "").trim()} alt="Merville Prime" style={styles.brandLogo} />
-            ) : (
-              <div style={styles.brand}>MERVILLE PRIME</div>
-            )}
+              <img src={(logoUrlsByMode[themeMode] ?? "").trim()} alt="Tasty Protein logo" style={styles.brandLogo} />
+            ) : null}
             {isAdmin && editMode ? (
               <button
                 type="button"
@@ -1588,7 +1706,7 @@ React.useEffect(() => {
           zoneStyle={navbarDisplayStyle}
           showZoneEditor={false}
           formatMoney={formatMoney}
-          searchStartOffset={isMobileViewport ? 0 : 252}
+          searchStartOffset={isMobileViewport ? 0 : desktopNavLeftWidth}
           isMobile={isMobileViewport}
         />
       </div>
@@ -1607,8 +1725,17 @@ React.useEffect(() => {
           <div
             style={{
               ...styles.productsLayout,
-              width: isMobileViewport ? "100%" : "var(--tp-rail-width)",
-              gridTemplateColumns: isMobileViewport ? "1fr" : "250px minmax(0, 1fr)",
+              gap: isMobileViewport ? 18 : desktopNavGap,
+              ...(isMobileViewport
+                ? {
+                    width: "100%",
+                    gridTemplateColumns: "1fr",
+                  }
+                : {
+                    ["--tp-center-col" as string]: `min(980px, calc(var(--tp-rail-width) - ${desktopNavLeftWidth}px))`,
+                    width: "var(--tp-rail-width)",
+                    gridTemplateColumns: `calc((var(--tp-rail-width) - var(--tp-center-col)) / 2 - ${desktopNavGap / 2}px) var(--tp-center-col)`,
+                  }),
             }}
           >
             {!isMobileViewport ? (
@@ -1660,7 +1787,12 @@ React.useEffect(() => {
               </aside>
             ) : null}
 
-            <div style={styles.gridWrap}>
+            <div
+              style={{
+                ...styles.gridWrap,
+                ...(isMobileViewport ? null : { padding: 0 }),
+              }}
+            >
               <ProductGrid
                 products={filteredProducts}
                 loading={loadingProducts}
@@ -1850,6 +1982,7 @@ React.useEffect(() => {
         isOpen={cartOpen}
         items={cartItemsForDisplay}
         subtotal={subtotal}
+        backgroundStyle={mainZoneStyle}
         onClose={() => setCartOpen(false)}
         onOpenProduct={handleCartOpenProduct as (id: string) => void}
         onAdd={addToCart}
@@ -1956,6 +2089,7 @@ React.useEffect(() => {
         onUploadFile={(file) => uploadUiAsset(file, "logo")}
         themeMode={themeMode}
       />
+      </div>
     </div>
   );
 }
@@ -1965,6 +2099,36 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
+  },
+  pageInner: {
+    minHeight: "100vh",
+  },
+  loaderWrap: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 999,
+    display: "grid",
+    placeItems: "center",
+    background: "rgba(0,0,0,0.72)",
+    backdropFilter: "blur(3px)",
+    WebkitBackdropFilter: "blur(3px)",
+    color: "#f2f2f2",
+    textTransform: "uppercase",
+    letterSpacing: 2.2,
+    fontSize: 15,
+    fontWeight: 700,
+    gap: 14,
+  },
+  loaderSpinner: {
+    width: 44,
+    height: 44,
+    borderRadius: "50%",
+    border: "3px solid rgba(255,255,255,0.2)",
+    borderTopColor: "#ffffff",
+    animation: "tp-spin 1s linear infinite",
+  },
+  loaderText: {
+    animation: "tp-pulse 1.2s ease-in-out infinite",
   },
   headerWrap: {
     position: "sticky",
@@ -1997,9 +2161,9 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-text-color)",
     background: "transparent",
     color: "var(--tp-text-color)",
-    padding: "0 14px",
+    padding: "0 15px",
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: 800,
     letterSpacing: 0.8,
     textTransform: "uppercase",
@@ -2012,8 +2176,8 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.9,
   },
   brandLogo: {
-    height: 90,
-    maxWidth: "min(68vw, 560px)",
+    height: 81,
+    maxWidth: "min(61.2vw, 504px)",
     width: "auto",
     objectFit: "contain",
   },
@@ -2047,6 +2211,7 @@ const styles: Record<string, React.CSSProperties> = {
     WebkitOverflowScrolling: "touch",
     position: "relative",
     zIndex: 10,
+    paddingBottom: 20,
   },
   mainZoneEditBtn: {
     position: "absolute",
@@ -2076,7 +2241,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 16,
     border: "none",
     borderRadius: 12,
-    padding: 12,
+    padding: "15px 15px 15px 0",
     background: "transparent",
   },
   createBtn: {
@@ -2085,10 +2250,10 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    fontSize: 12,
+    fontSize: 15,
     fontWeight: 800,
     letterSpacing: 1,
-    padding: "0 12px",
+    padding: "0 15px",
     cursor: "pointer",
     marginBottom: 10,
     width: "100%",
@@ -2128,7 +2293,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(0,0,0,0.16)",
     fontSize: 10,
     fontWeight: 800,
-    lineHeight: "14px",
+    lineHeight: "15px",
     padding: "0 4px",
     textAlign: "center",
   },
@@ -2168,13 +2333,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "transparent",
     color: "var(--tp-text-color)",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 800,
     letterSpacing: 1,
     cursor: "pointer",
   },
   filterTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 900,
     letterSpacing: 1.1,
     marginBottom: 20,
@@ -2190,7 +2355,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "transparent",
     color: "var(--tp-text-color)",
-    fontSize: 14,
+    fontSize: 15,
     padding: "0 8px",
     cursor: "pointer",
   },

@@ -98,9 +98,7 @@ export default function LogoPlaceholder({ style }: Props) {
             ...styles.wordmark,
             color: mode === "light" ? "black" : "white",
           }}
-        >
-          MERVILLE PRIME
-        </div>
+        />
       )}
     </div>
   );
@@ -116,14 +114,12 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
   },
   wordmark: {
-    fontSize: 13,
-    letterSpacing: 2.2,
-    fontWeight: 900,
-    color: "white",
-    textAlign: "center",
-    lineHeight: 1.2,
+    width: "60%",
+    height: 2,
+    background: "currentColor",
+    borderRadius: 999,
     userSelect: "none",
-    opacity: 0.5,
+    opacity: 0.25,
   },
   logoImg: {
     width: "auto",

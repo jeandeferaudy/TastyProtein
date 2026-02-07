@@ -46,7 +46,7 @@ export default function CartDrawer({
       <div style={styles.header}>
         <div style={styles.title}>Your Cart</div>
         <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button" aria-label="Close">
-          X
+          CLOSE
         </AppButton>
       </div>
 
@@ -104,7 +104,7 @@ export default function CartDrawer({
                   <div
                     style={{
                       ...styles.qty,
-                      color: i.qty > 0 ? "var(--tp-accent)" : styles.qty.color,
+                      color: "var(--tp-text-color)",
                     }}
                   >
                     {i.qty}
@@ -168,23 +168,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--tp-text-color)",
   },
   header: {
-    padding: "16px 16px 12px",
+    padding: "16px 16px 15px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     borderBottom: "1px solid var(--tp-border-color-soft)",
   },
-  title: { fontSize: 18, fontWeight: 800 },
+  title: { fontSize: 16, fontWeight: 800 },
   btn: {
     width: 68,
     minWidth: 68,
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
+    border: "none",
+    background: "transparent",
+    justifyContent: "flex-end",
+    textAlign: "right",
   },
   body: {
     padding: 16,
@@ -201,7 +205,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gridTemplateColumns: "56px 1fr auto",
     gap: 12,
-    padding: "12px 0",
+    padding: "15px 0",
     borderBottom: "1px solid var(--tp-border-color-soft)",
     cursor: "pointer",
   },
@@ -220,11 +224,11 @@ const styles: Record<string, React.CSSProperties> = {
     display: "block",
   },
   left: {},
-  name: { fontSize: 14, fontWeight: 700, marginBottom: 6 },
-  meta: { fontSize: 13, opacity: 0.75 },
+  name: { fontSize: 15, fontWeight: 700, marginBottom: 6 },
+  meta: { fontSize: 15, opacity: 0.75 },
   right: { textAlign: "right" },
-  lineTotal: { fontSize: 13, fontWeight: 700, marginBottom: 8 },
-  perPiece: { fontSize: 13, opacity: 0.72, marginBottom: 8 },
+  lineTotal: { fontSize: 15, fontWeight: 700, marginBottom: 8 },
+  perPiece: { fontSize: 15, opacity: 0.72, marginBottom: 8 },
   pmRow: {
     display: "grid",
     gridTemplateColumns: "32px 32px 32px",
@@ -246,9 +250,9 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
     transform: "translateY(-1px)",
   },
-  qty: { fontSize: 13, fontWeight: 800, textAlign: "center" },
+  qty: { fontSize: 15, fontWeight: 800, textAlign: "center" },
   footer: {
-    padding: 16,
+    padding: "16px 16px 36px",
     borderTop: "1px solid var(--tp-border-color-soft)",
   },
   totalRow: {
@@ -265,7 +269,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--tp-cta-bg)",
     color: "var(--tp-cta-fg)",
     border: "1px solid var(--tp-cta-border)",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",

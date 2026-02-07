@@ -24,6 +24,9 @@ type Draft = {
   type: string;
   size: string;
   size_g: string;
+  cut: string;
+  preparation: string;
+  packaging: string;
   temperature: string;
   country_of_origin: string;
   selling_price: string;
@@ -48,6 +51,9 @@ function buildAutoKeywords(draft: Draft, computedSizeText: string): string {
     draft.name,
     draft.long_name,
     draft.type,
+    draft.cut,
+    draft.preparation,
+    draft.packaging,
     draft.temperature,
     draft.country_of_origin,
     computedSizeText || draft.size,
@@ -82,6 +88,9 @@ function toDraft(p: DbProduct): Draft {
     type: p.type ?? "",
     size: p.size ?? "",
     size_g: p.size_g != null ? String(p.size_g) : "",
+    cut: p.cut ?? "",
+    preparation: p.preparation ?? "",
+    packaging: p.packaging ?? "",
     temperature: p.temperature ?? "",
     country_of_origin: p.country_of_origin ?? "",
     selling_price: p.selling_price != null ? String(p.selling_price) : "",
@@ -174,10 +183,11 @@ export default function ProductEditorDrawer({
   const setField = (k: keyof Draft, v: string) => setDraft((prev) => (prev ? { ...prev, [k]: v } : prev));
 
   const removeImage = (id: string) => {
-    setImageRows((prev) => prev.filter((row) => row.id !== id));
-    setTimeout(() => {
-      void save();
-    }, 0);
+    setImageRows((prev) => {
+      const next = prev.filter((row) => row.id !== id);
+      void saveWith({ imageRowsOverride: next });
+      return next;
+    });
   };
 
   const reindexRows = (rows: ImageRow[]) => {
@@ -193,11 +203,10 @@ export default function ProductEditorDrawer({
       const next = [...prev];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
-      return reindexRows(next);
+      const reindexed = reindexRows(next);
+      void saveWith({ imageRowsOverride: reindexed });
+      return reindexed;
     });
-    setTimeout(() => {
-      void save();
-    }, 0);
   };
 
   const moveImage = (id: string, dir: -1 | 1) => {
@@ -209,11 +218,10 @@ export default function ProductEditorDrawer({
       const next = [...prev];
       const [moved] = next.splice(index, 1);
       next.splice(target, 0, moved);
-      return reindexRows(next);
+      const reindexed = reindexRows(next);
+      void saveWith({ imageRowsOverride: reindexed });
+      return reindexed;
     });
-    setTimeout(() => {
-      void save();
-    }, 0);
   };
 
   const setImageOrder = (id: string, nextOrderRaw: string) => {
@@ -228,11 +236,10 @@ export default function ProductEditorDrawer({
       const next = [...prev];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
-      return reindexRows(next);
+      const reindexed = reindexRows(next);
+      void saveWith({ imageRowsOverride: reindexed });
+      return reindexed;
     });
-    setTimeout(() => {
-      void save();
-    }, 0);
   };
 
   const uploadToStorage = async (
@@ -279,11 +286,10 @@ export default function ProductEditorDrawer({
             url,
           });
         }
-        return reindexRows(merged);
+        const reindexed = reindexRows(merged);
+        void saveWith({ imageRowsOverride: reindexed });
+        return reindexed;
       });
-      setTimeout(() => {
-        void save();
-      }, 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Image upload failed.");
     } finally {
@@ -301,10 +307,9 @@ export default function ProductEditorDrawer({
     setUploading(true);
     try {
       const url = await uploadToStorage(file, "thumb");
-      setField("thumbnail_url", url);
-      setTimeout(() => {
-        void save();
-      }, 0);
+      const nextDraft = { ...draft, thumbnail_url: url };
+      setDraft(nextDraft);
+      void saveWith({ draftOverride: nextDraft });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Thumbnail upload failed.");
     } finally {
@@ -312,42 +317,60 @@ export default function ProductEditorDrawer({
     }
   };
 
-  const save = async () => {
-    if (!draft) return;
-    setError("");
-    const nextSnapshot = JSON.stringify({
-      draft,
-      sizeUnit,
-      images: reindexRows(imageRows).map((row) => ({
+  const buildSnapshot = (nextDraft: Draft, nextSizeUnit: SizeUnit, nextRows: ImageRow[]) =>
+    JSON.stringify({
+      draft: nextDraft,
+      sizeUnit: nextSizeUnit,
+      images: reindexRows(nextRows).map((row) => ({
         sort_order: row.sort_order,
         url: row.url.trim(),
       })),
     });
+
+  const saveWith = async ({
+    draftOverride,
+    sizeUnitOverride,
+    imageRowsOverride,
+  }: {
+    draftOverride?: Draft;
+    sizeUnitOverride?: SizeUnit;
+    imageRowsOverride?: ImageRow[];
+  } = {}) => {
+    const activeDraft = draftOverride ?? draft;
+    const activeSizeUnit = sizeUnitOverride ?? sizeUnit;
+    const activeRows = imageRowsOverride ?? imageRows;
+    if (!activeDraft) return;
+    setError("");
+    const nextSnapshot = buildSnapshot(activeDraft, activeSizeUnit, activeRows);
     if (nextSnapshot === lastSavedSnapshotRef.current) return;
     setSaving(true);
     try {
-      const selling = draft.selling_price.trim() ? Number(draft.selling_price) : null;
-      const sizeG = draft.size_g.trim() ? Number(draft.size_g) : null;
-      const sortValue = draft.sort.trim() ? Number(draft.sort) : null;
+      const selling = activeDraft.selling_price.trim() ? Number(activeDraft.selling_price) : null;
+      const sizeG = activeDraft.size_g.trim() ? Number(activeDraft.size_g) : null;
+      const sortValue = activeDraft.sort.trim() ? Number(activeDraft.sort) : null;
 
       if (selling != null && Number.isNaN(selling)) throw new Error("Selling price must be a number.");
       if (sizeG != null && Number.isNaN(sizeG)) throw new Error("Size (g) must be a number.");
       if (sortValue != null && Number.isNaN(sortValue)) throw new Error("Sort must be a number.");
 
-      const autoKeywords = buildAutoKeywords(draft, autoSizeText);
+      const computedSizeText = formatAutoSizeText(activeDraft.size_g, activeSizeUnit);
+      const autoKeywords = buildAutoKeywords(activeDraft, computedSizeText);
       const productPayload = {
-        name: draft.name || null,
-        long_name: draft.long_name || null,
-        description: draft.description || null,
-        type: draft.type || null,
-        size: autoSizeText || null,
+        name: activeDraft.name || null,
+        long_name: activeDraft.long_name || null,
+        description: activeDraft.description || null,
+        type: activeDraft.type || null,
+        cut: activeDraft.cut || null,
+        preparation: activeDraft.preparation || null,
+        packaging: activeDraft.packaging || null,
+        size: computedSizeText || null,
         size_g: sizeG,
-        temperature: draft.temperature || null,
-        country_of_origin: draft.country_of_origin || null,
+        temperature: activeDraft.temperature || null,
+        country_of_origin: activeDraft.country_of_origin || null,
         selling_price: selling,
-        thumbnail_url: draft.thumbnail_url || null,
+        thumbnail_url: activeDraft.thumbnail_url || null,
         keywords: autoKeywords || null,
-        status: draft.status || null,
+        status: activeDraft.status || null,
         sort: sortValue,
       };
 
@@ -369,7 +392,7 @@ export default function ProductEditorDrawer({
         .eq("product_id", product.id);
       if (delErr) throw delErr;
 
-      const cleaned = reindexRows(imageRows)
+      const cleaned = reindexRows(activeRows)
         .map((row) => ({ ...row, url: row.url.trim() }))
         .filter((row) => row.url)
         .sort((a, b) => a.sort_order - b.sort_order);
@@ -409,7 +432,7 @@ export default function ProductEditorDrawer({
   };
 
   const handleAutoSave = () => {
-    void save();
+    void saveWith();
   };
 
   const handleDelete = async () => {
@@ -648,6 +671,20 @@ export default function ProductEditorDrawer({
                 </select>
                 <div style={styles.sizeTextReadOnly}>{autoSizeText || "—"}</div>
               </div>
+              <label style={styles.label}>Cut</label>
+              <input
+                style={styles.input}
+                value={draft.cut}
+                onChange={(e) => setField("cut", e.target.value)}
+                onBlur={handleAutoSave}
+              />
+              <label style={styles.label}>Preparation</label>
+              <input
+                style={styles.input}
+                value={draft.preparation}
+                onChange={(e) => setField("preparation", e.target.value)}
+                onBlur={handleAutoSave}
+              />
               <label style={styles.label}>Status</label>
               <select
                 style={{
@@ -774,7 +811,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 40,
-    padding: "18px 0 12px",
+    padding: "18px 0 15px",
   },
   backBtn: {
     width: 68,
@@ -782,12 +819,16 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: 700,
     letterSpacing: 1,
+    border: "none",
+    background: "transparent",
+    justifyContent: "flex-start",
+    textAlign: "left",
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 900,
     letterSpacing: 2,
     color: "#fff",
@@ -795,7 +836,7 @@ const styles: Record<string, React.CSSProperties> = {
   content: {
     flex: 1,
     overflowY: "auto",
-    padding: "8px 0 24px 108px",
+    padding: "8px 0 44px 108px",
   },
   grid: {
     display: "grid",
@@ -811,7 +852,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "white",
   },
   section: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 1.5,
     opacity: 0.8,
@@ -819,7 +860,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   label: {
     display: "block",
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
     marginTop: 10,
     marginBottom: 6,
@@ -845,7 +886,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.15)",
     background: "rgba(255,255,255,0.03)",
     color: "rgba(255,255,255,0.95)",
-    padding: "0 12px",
+    padding: "0 15px",
     display: "flex",
     alignItems: "center",
     fontWeight: 700,
@@ -858,7 +899,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.15)",
     background: "rgba(255,255,255,0.05)",
     color: "white",
-    padding: "0 12px",
+    padding: "0 15px",
   },
   textarea: {
     width: "100%",
@@ -867,12 +908,12 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.15)",
     background: "rgba(255,255,255,0.05)",
     color: "white",
-    padding: "10px 12px",
+    padding: "10px 15px",
     resize: "vertical",
   },
   helperText: {
     marginTop: 6,
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.66,
   },
   statusSelect: {
@@ -917,7 +958,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
     padding: "0 10px",
-    fontSize: 13,
+    fontSize: 15,
     letterSpacing: 0.8,
     cursor: "pointer",
   },
@@ -930,7 +971,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: 10,
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.85,
   },
   dropZoneActive: {
@@ -975,7 +1016,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 13,
+    fontSize: 15,
     cursor: "grab",
   },
   urlInput: {
@@ -993,7 +1034,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   orderLabel: {
-    fontSize: 13,
+    fontSize: 15,
     opacity: 0.75,
   },
   orderInput: {
@@ -1004,7 +1045,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(255,255,255,0.05)",
     color: "white",
     padding: "0 8px",
-    fontSize: 13,
+    fontSize: 15,
   },
   rowTools: {
     display: "grid",
@@ -1017,14 +1058,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
-    fontSize: 13,
+    fontSize: 15,
     cursor: "pointer",
   },
   removeBtn: {
     height: 70,
     borderRadius: 8,
     padding: "0 10px",
-    fontSize: 13,
+    fontSize: 15,
     letterSpacing: 0.8,
   },
   extraCard: {
@@ -1039,7 +1080,7 @@ const styles: Record<string, React.CSSProperties> = {
   error: {
     marginTop: 10,
     color: "#ff9292",
-    fontSize: 13,
+    fontSize: 15,
   },
   saveHintRow: {
     marginTop: 12,
@@ -1049,7 +1090,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 28,
   },
   savingHint: {
-    fontSize: 13,
+    fontSize: 15,
     color: "rgba(255,255,255,0.75)",
   },
   savedHint: {
@@ -1063,7 +1104,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     padding: "0 10px",
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: 700,
     letterSpacing: 0.4,
   },
