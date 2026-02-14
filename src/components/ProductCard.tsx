@@ -3,13 +3,13 @@
 
 import * as React from "react";
 import type { DbProduct } from "@/lib/products";
-import { AppButton, GearIcon } from "@/components/ui";
+import { AppButton, GearIcon, QtyIcon } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 
 type Props = {
   product: DbProduct;
   qty: number;
-  viewMode?: "list" | "4" | "6";
+  viewMode?: "list" | "4" | "5";
   mobileListLayout?: boolean;
   canEdit?: boolean;
 
@@ -74,16 +74,33 @@ export default function ProductCard({
   const country = product.country_of_origin?.trim() || "N/A";
   const temperature = product.temperature?.trim() || "N/A";
   const format = toSmartSizeText(product.size);
+  const priceSuffix = format && format !== "N/A" ? ` for ${format}` : "";
   const imageUrl = product.thumbnail_url?.trim() || "";
-  const isCompactTile = viewMode === "6";
-  const tileTitleStyle: React.CSSProperties =
-    isCompactTile ? { ...styles.title, fontSize: 15 } : styles.title;
+  const isCompactTile = viewMode === "5";
+  const tileTitleStyle: React.CSSProperties = isCompactTile
+    ? { ...styles.title, ...styles.titleCompact }
+    : styles.title;
   const tileMetaStyle: React.CSSProperties = isCompactTile
     ? { ...styles.metaLabel, fontSize: 15 }
     : styles.metaLabel;
   const tilePriceStyle: React.CSSProperties = isCompactTile
     ? { ...styles.price, fontSize: 16 }
     : styles.price;
+  const tileRowStyle: React.CSSProperties = isCompactTile
+    ? { ...styles.row, ...styles.rowCompact }
+    : styles.row;
+  const tileRightValueStyle: React.CSSProperties = isCompactTile
+    ? styles.metaRightCompact
+    : styles.metaRight;
+  const tilePmRowStyle: React.CSSProperties = isCompactTile
+    ? { ...styles.pmRow, ...styles.pmRowCompact }
+    : styles.pmRow;
+  const tilePmBtnStyle: React.CSSProperties = isCompactTile
+    ? styles.pmBtnCompact
+    : styles.pmBtn;
+  const tileTopStyle: React.CSSProperties = isCompactTile
+    ? { ...styles.top, ...styles.topCompact }
+    : styles.top;
   const status = (product.status ?? "Active").toLowerCase();
   const normalizedStatus: "Active" | "Disabled" | "Archived" =
     status === "disabled" ? "Disabled" : status === "archived" ? "Archived" : "Active";
@@ -149,11 +166,15 @@ export default function ProductCard({
             }}
           >
             <div style={useMobileList ? styles.listMetaMobile : styles.listMeta}>
-              {[country, temperature, format].join(" • ")}
+              {[country, temperature].join(" • ")}
             </div>
           </button>
           {useMobileList ? (
             <div style={styles.listBottomRowMobile}>
+              <div style={styles.listPriceMobile}>
+                ₱ {formatMoney(price)}
+                <span style={styles.listPerInline}>{priceSuffix}</span>
+              </div>
               <div style={styles.listPmRow}>
                 <AppButton
                   variant="ghost"
@@ -164,7 +185,7 @@ export default function ProductCard({
                   }}
                   style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
                 >
-                  <span style={styles.pmGlyph}>−</span>
+                  <QtyIcon type="minus" />
                 </AppButton>
                 <div
                   style={{
@@ -183,10 +204,9 @@ export default function ProductCard({
                   }}
                   style={styles.listPmBtn}
                 >
-                  <span style={styles.pmGlyph}>+</span>
+                  <QtyIcon type="plus" />
                 </AppButton>
               </div>
-              <div style={styles.listPriceMobile}>₱ {formatMoney(price)}</div>
             </div>
           ) : null}
         </div>
@@ -235,7 +255,10 @@ export default function ProductCard({
 
         {!useMobileList ? (
           <div style={styles.listRight}>
-            <div style={styles.listPrice}>₱ {formatMoney(price)}</div>
+            <div style={styles.listPrice}>
+              ₱ {formatMoney(price)}
+              <span style={styles.listPerInline}>{priceSuffix}</span>
+            </div>
             <div style={styles.listPmRow}>
               <AppButton
                 variant="ghost"
@@ -246,7 +269,7 @@ export default function ProductCard({
                 }}
                 style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
               >
-                <span style={styles.pmGlyph}>−</span>
+                <QtyIcon type="minus" />
               </AppButton>
               <div
                 style={{
@@ -265,7 +288,7 @@ export default function ProductCard({
                 }}
                 style={styles.listPmBtn}
               >
-                <span style={styles.pmGlyph}>+</span>
+                <QtyIcon type="plus" />
               </AppButton>
             </div>
           </div>
@@ -278,7 +301,7 @@ export default function ProductCard({
     <div style={styles.card} onClick={openProduct}>
       <button
         type="button"
-        style={styles.top}
+        style={tileTopStyle}
         onClick={(e) => {
           e.stopPropagation();
           openProduct();
@@ -299,14 +322,16 @@ export default function ProductCard({
 
         <div style={tileTitleStyle}>{shortName}</div>
 
-        <div style={styles.row}>
+        <div style={tileRowStyle}>
           <div style={tileMetaStyle}>{country}</div>
-          <div style={tilePriceStyle}>₱ {formatMoney(price)}</div>
+          <div style={{ ...tilePriceStyle, textAlign: "right" }}>₱ {formatMoney(price)}</div>
         </div>
 
-        <div style={styles.row}>
-          <div style={tileMetaStyle}>{temperature}</div>
-          <div style={tileMetaStyle}>{format}</div>
+        <div style={tileRowStyle}>
+          <div style={isCompactTile ? { ...tileMetaStyle, ...styles.metaOneLine } : tileMetaStyle}>
+            {temperature}
+          </div>
+          <div style={{ ...tileMetaStyle, ...tileRightValueStyle }}>{format}</div>
         </div>
       </button>
 
@@ -354,7 +379,7 @@ export default function ProductCard({
         </div>
       )}
 
-      <div style={styles.pmRow}>
+      <div style={tilePmRowStyle}>
         <AppButton
           variant="ghost"
           disabled={qty <= 0}
@@ -363,6 +388,7 @@ export default function ProductCard({
             onRemove(id);
           }}
           style={{
+            ...tilePmBtnStyle,
             opacity: qty <= 0 ? 0.45 : 1,
             display: "flex",
             alignItems: "center",
@@ -372,7 +398,7 @@ export default function ProductCard({
             lineHeight: 1,
           }}
         >
-          <span style={styles.pmGlyph}>−</span>
+          <QtyIcon type="minus" />
         </AppButton>
 
         <div
@@ -392,6 +418,7 @@ export default function ProductCard({
             onAdd(id);
           }}
           style={{
+            ...tilePmBtnStyle,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -400,7 +427,7 @@ export default function ProductCard({
             lineHeight: 1,
           }}
         >
-          <span style={styles.pmGlyph}>+</span>
+          <QtyIcon type="plus" />
         </AppButton>
       </div>
     </div>
@@ -429,6 +456,10 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     display: "flex",
     flexDirection: "column",
+  },
+  topCompact: {
+    flex: "0 0 auto",
+    padding: 9,
   },
   img: {
     width: "100%",
@@ -464,12 +495,26 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.2,
     marginBottom: 10,
   },
+  titleCompact: {
+    fontSize: 15,
+    lineHeight: 1.2,
+    minHeight: "2.4em",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
   row: {
     display: "grid",
     gridTemplateColumns: "1fr auto",
     alignItems: "center",
     columnGap: 10,
     marginBottom: 6,
+  },
+  rowCompact: {
+    gridTemplateColumns: "minmax(0,1fr) 68px",
+    columnGap: 8,
   },
   price: {
     fontSize: 18,
@@ -480,6 +525,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     opacity: 0.82,
   },
+  metaRight: {
+    textAlign: "right",
+  },
+  metaRightCompact: {
+    textAlign: "right",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  metaOneLine: {
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
   pmRow: {
     padding: 12,
     paddingTop: 10,
@@ -488,6 +547,25 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     alignItems: "center",
     borderTop: "none",
+  },
+  pmRowCompact: {
+    gridTemplateColumns: "40px 1fr 40px",
+    gap: 8,
+    marginTop: 0,
+    padding: 7,
+    paddingTop: 5,
+  },
+  pmBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    padding: 0,
+  },
+  pmBtnCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
+    padding: 0,
   },
   adminRow: {
     padding: "0 15px 10px",
@@ -521,10 +599,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     fontWeight: 900,
     opacity: 0.9,
-  },
-  pmGlyph: {
-    lineHeight: 1,
-    transform: "translateY(-1px)",
   },
   listCard: {
     borderRadius: 14,
@@ -668,6 +742,13 @@ const styles: Record<string, React.CSSProperties> = {
   listPrice: {
     fontSize: 18,
     fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  listPerInline: {
+    fontSize: 14,
+    fontWeight: 500,
+    opacity: 0.82,
+    marginLeft: 8,
   },
   listEditBtn: {
     height: 40,

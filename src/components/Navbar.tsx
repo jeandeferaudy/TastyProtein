@@ -11,13 +11,11 @@ type Props = {
   search: string;
   setSearch: (v: string) => void;
 
-  totalUnits: number;
-  subtotal: number;
-
   onOpenCart: () => void;
+  totalUnits: number;
   onShop: () => void;
-  gridView: "list" | "4" | "6";
-  onChangeGridView: (next: "list" | "4" | "6") => void;
+  gridView: "list" | "4" | "5";
+  onChangeGridView: (next: "list" | "4" | "5") => void;
   authLabel: string | null;
   onOpenAuth: () => void;
   onOpenProfile: () => void;
@@ -33,7 +31,6 @@ type Props = {
   showZoneEditor?: boolean;
   onOpenZoneEditor?: () => void;
 
-  formatMoney: (n: unknown) => string;
   searchStartOffset?: number;
   isMobile?: boolean;
   showSearch?: boolean;
@@ -42,9 +39,8 @@ type Props = {
 export default function Navbar({
   search,
   setSearch,
-  totalUnits,
-  subtotal,
   onOpenCart,
+  totalUnits,
   onShop,
   gridView,
   onChangeGridView,
@@ -62,7 +58,6 @@ export default function Navbar({
   zoneStyle,
   showZoneEditor = false,
   onOpenZoneEditor,
-  formatMoney,
   searchStartOffset = 0,
   isMobile = false,
   showSearch = true,
@@ -106,7 +101,6 @@ export default function Navbar({
   const navCenterWidth = !isMobile
     ? `min(1000px, calc(var(--tp-rail-width) - ${searchStartOffset}px + 20px))`
     : "100%";
-
   return (
     <nav
       className="tp-navbar"
@@ -134,9 +128,10 @@ export default function Navbar({
             style={{
               ...styles.navBtn,
               justifyContent: "flex-start",
-              paddingLeft: 0,
-              marginLeft: -2,
+              marginLeft: 0,
               ...(isMobile ? styles.navBtnMobile : null),
+              ...(!isMobile ? { padding: "0 15px 0 0" } : null),
+              ...(isMobile ? { padding: "0 15px 0 0" } : null),
             }}
             onClick={onShop}
           >
@@ -269,7 +264,16 @@ export default function Navbar({
                 ...(isMobile ? styles.navSearchWrapMobile : styles.navSearchWrapDesktop),
               }}
             >
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style={styles.navSearchIcon}>
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                aria-hidden="true"
+                style={{
+                  ...styles.navSearchIcon,
+                  ...(isMobile ? styles.navSearchIconMobile : null),
+                }}
+              >
                 <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" fill="none" />
                 <path d="M16.5 16.5L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
@@ -352,11 +356,11 @@ export default function Navbar({
                     ...styles.viewBtn,
                     ...(isMobile ? styles.viewBtnMobile : null),
                     ...styles.viewBtnLast,
-                    ...(gridView === "6" ? styles.viewBtnActive : null),
+                    ...(gridView === "5" ? styles.viewBtnActive : null),
                   }}
-                  onClick={() => onChangeGridView("6")}
-                  aria-label="6-up grid view"
-                  title="6-up grid view"
+                  onClick={() => onChangeGridView("5")}
+                  aria-label="5-up grid view"
+                  title="5-up grid view"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -442,11 +446,11 @@ export default function Navbar({
                     ...styles.viewBtn,
                     ...(isMobile ? styles.viewBtnMobile : null),
                     ...styles.viewBtnLast,
-                    ...(gridView === "6" ? styles.viewBtnActive : null),
+                    ...(gridView === "5" ? styles.viewBtnActive : null),
                   }}
-                  onClick={() => onChangeGridView("6")}
-                  aria-label="6-up grid view"
-                  title="6-up grid view"
+                  onClick={() => onChangeGridView("5")}
+                  aria-label="5-up grid view"
+                  title="5-up grid view"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -469,19 +473,30 @@ export default function Navbar({
               </div>
             </div>
           ) : null}
-          <div style={{ ...(isMobile ? styles.cartWrapMobile : null) }}>
+          <div
+            style={
+              isMobile
+                ? styles.cartWrapMobile
+                : {
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    marginLeft: "auto",
+                  }
+            }
+          >
             <AppButton
               variant="nav"
               style={{
                 ...styles.navBtn,
                 ...(isMobile ? styles.navBtnMobile : null),
+                ...styles.navCartCompact,
+                ...(!isMobile ? styles.navCartDesktopAligned : null),
                 ...(isMobile ? styles.navCartMobile : null),
               }}
               onClick={onOpenCart}
             >
-              {isMobile
-                ? `CART - ₱ ${Math.round(Number(subtotal || 0)).toLocaleString("en-PH")}`
-                : `CART - ₱ ${formatMoney(subtotal)}`}
+              {`CART (${Math.max(0, totalUnits)})`}
             </AppButton>
           </div>
         </div>
@@ -504,7 +519,7 @@ export default function Navbar({
 const styles: Record<string, React.CSSProperties> = {
   navbar: {
     position: "relative",
-    zIndex: 1200,
+    zIndex: 1300,
     width: "100vw",
     marginLeft: "calc(50% - 50vw)",
     background: "transparent",
@@ -525,8 +540,8 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "1fr auto",
     gridTemplateRows: "auto auto",
     columnGap: 8,
-    rowGap: 8,
-    padding: "10px 10px",
+    rowGap: 0,
+    padding: "6px 10px",
   },
   navLeft: { display: "flex", alignItems: "center", gap: NAV_INLINE_GAP },
   navLeftMobile: { gridColumn: "1 / 2", gridRow: "1 / 2", minWidth: 0, gap: 8 },
@@ -576,10 +591,23 @@ const styles: Record<string, React.CSSProperties> = {
   },
   navCartMobile: {
     fontSize: 15,
-    padding: "0 10px",
-    minWidth: 150,
-    maxWidth: "50vw",
+    padding: "0 0 0 10px",
+    minWidth: 126,
+    maxWidth: "44vw",
     whiteSpace: "nowrap",
+    justifyContent: "flex-end",
+    textAlign: "right",
+  },
+  navCartCompact: {
+    padding: "0 12px",
+    letterSpacing: 0.2,
+    whiteSpace: "nowrap",
+  },
+  navCartDesktopAligned: {
+    justifyContent: "flex-end",
+    padding: "0 0 0 12px",
+    border: "none",
+    transform: "translateX(5px)",
   },
   cartWrapMobile: {
     gridColumn: "2 / 3",
@@ -587,6 +615,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "center",
+    justifySelf: "end",
   },
   viewToggleWrapMobile: {
     gridColumn: "2 / 3",
@@ -594,6 +623,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "center",
+    justifySelf: "end",
+    transform: "translateX(10px)",
   },
   viewToggleWrapCenter: {
     display: "flex",
@@ -725,6 +756,11 @@ const styles: Record<string, React.CSSProperties> = {
   navSearchWrapMobile: {
     height: 40,
     marginRight: 0,
+    padding: "0 8px 0 0",
+    gap: 8,
+  },
+  navSearchIconMobile: {
+    transform: "none",
   },
   navSearchIcon: {
     opacity: 0.9,

@@ -129,4 +129,22 @@ export function GearIcon({ size = 16 }: GearIconProps) {
   );
 }
 
+type QtyIconProps = {
+  type: "plus" | "minus";
+};
+
+// Shared glyph for all cart qty controls. The mark is always 50% of button size.
+export function QtyIcon({ type }: QtyIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width="50%" height="50%" aria-hidden="true">
+      <path
+        d={type === "plus" ? "M12 5v14M5 12h14" : "M5 12h14"}
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export default AppButton;

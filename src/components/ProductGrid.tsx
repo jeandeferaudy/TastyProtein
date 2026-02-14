@@ -11,7 +11,7 @@ type Props = {
   products: Product[];
   loading: boolean;
   cart: CartState;
-  viewMode: "list" | "4" | "6";
+  viewMode: "list" | "4" | "5";
   canEditProducts?: boolean;
 
   onAdd: (id: string) => void;
@@ -51,9 +51,9 @@ export default function ProductGrid({
     return () => observer.disconnect();
   }, []);
 
-  const gap = viewMode === "6" ? 10 : 24;
-  const targetColumns = viewMode === "list" ? 1 : viewMode === "4" ? 3 : 6;
-  const minTileWidth = viewMode === "6" ? 150 : viewMode === "4" ? 220 : 0;
+  const gap = viewMode === "5" ? 10 : 24;
+  const targetColumns = viewMode === "list" ? 1 : viewMode === "4" ? 3 : 5;
+  const minTileWidth = viewMode === "5" ? 150 : viewMode === "4" ? 220 : 0;
   const safeWidth = Math.max(sectionWidth, 0);
 
   let columns = targetColumns;
@@ -115,7 +115,7 @@ export default function ProductGrid({
       {loading && <div style={styles.emptyHint}>Loading products…</div>}
 
       {!loading && products.length === 0 && (
-        <div style={styles.emptyHint}>No results. Try a different keyword.</div>
+        <div style={styles.emptyHint}>No results. Try different search or filters.</div>
       )}
     </section>
   );
@@ -130,7 +130,14 @@ const styles: Record<string, CSSProperties> = {
     gap: 24,
   },
   emptyHint: {
-    marginTop: 16,
-    color: "#888",
+    marginTop: 24,
+    minHeight: "40vh",
+    display: "grid",
+    placeItems: "center",
+    textAlign: "center",
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: 600,
+    opacity: 0.95,
   },
 };

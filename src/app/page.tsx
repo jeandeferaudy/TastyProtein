@@ -47,6 +47,7 @@ import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 
 type Panel = null | "product" | "checkout" | "edit";
 type ZoneName = "header" | "navbar" | "main";
+type FilterKey = "type" | "cut" | "country" | "preparation" | "temperature";
 
 type ZoneRow = {
   zone: ZoneName;
@@ -157,6 +158,7 @@ export default function Page() {
 
   // remember list scroll position for "back to where I was"
   const listScrollTopRef = React.useRef<number>(0);
+  const windowScrollTopRef = React.useRef<number>(0);
 
   // ----------------------------
   // Products
@@ -166,14 +168,22 @@ export default function Page() {
     Record<string, ProductImage[]>
   >({});
   const [loadingProducts, setLoadingProducts] = React.useState<boolean>(true);
-  const [selectedTypes, setSelectedTypes] = React.useState<string[]>([]);
+  const [selectedFilters, setSelectedFilters] = React.useState<Record<FilterKey, string[]>>({
+    type: [],
+    cut: [],
+    country: [],
+    preparation: [],
+    temperature: [],
+  });
   const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState<boolean>(false);
 
   const [search, setSearch] = React.useState<string>("");
-  const [gridView, setGridView] = React.useState<"list" | "4" | "6">("4");
+  const [gridView, setGridView] = React.useState<"list" | "4" | "5">("4");
   const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
   const [authOpen, setAuthOpen] = React.useState<boolean>(false);
   const [authLabel, setAuthLabel] = React.useState<string | null>(null);
+  const [authReady, setAuthReady] = React.useState(false);
+  const [authProfileName, setAuthProfileName] = React.useState<string>("");
   const [authUserId, setAuthUserId] = React.useState<string | null>(null);
   const [authEmail, setAuthEmail] = React.useState<string>("");
   const [authPhone, setAuthPhone] = React.useState<string>("");
@@ -309,9 +319,12 @@ export default function Page() {
     country: "Philippines",
   });
   const [paymentFile, setPaymentFile] = React.useState<File | null>(null);
-  const resolvedGridView: "list" | "4" | "6" = gridView;
-  const desktopNavLeftWidth = 252;
+  const resolvedGridView: "list" | "4" | "5" = gridView;
+  const mobileLogoHeight = Math.round(136 * 0.805);
+  const desktopNavLeftWidth = Math.round(252 * 1.15);
   const desktopNavGap = 10;
+  const desktopCenterColWidthCss = `min(980px, calc(var(--tp-rail-width) - ${desktopNavLeftWidth}px))`;
+  const desktopSideColWidthCss = `calc((var(--tp-rail-width) - ${desktopCenterColWidthCss}) / 2 - ${desktopNavGap}px)`;
   const pendingRouteRef = React.useRef<{ path: string; search: string } | null>(null);
   const isApplyingRouteRef = React.useRef(false);
   const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
@@ -368,7 +381,8 @@ export default function Page() {
   }, []);
 
   React.useEffect(() => {
-    setGridView("4");
+    const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+    setGridView(isMobile ? "5" : "4");
   }, []);
 
   // ----------------------------
@@ -634,6 +648,7 @@ export default function Page() {
   React.useEffect(() => {
     let mounted = true;
     const loadRole = async () => {
+      if (mounted) setAuthReady(false);
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -643,9 +658,11 @@ export default function Page() {
         setEditMode(false);
         setAdminAllProductsMode(false);
         setAuthLabel(null);
+        setAuthProfileName("");
         setAuthUserId(null);
         setAuthEmail("");
         setAuthPhone("");
+        setAuthReady(true);
         return;
       }
 
@@ -654,7 +671,8 @@ export default function Page() {
         (user.user_metadata?.name as string | undefined) ||
         user.email ||
         user.phone;
-      setAuthLabel(rawLabel ? String(rawLabel).trim() : null);
+      const fallbackLabel = rawLabel ? String(rawLabel).trim() : null;
+      setAuthLabel(authProfileName ? authProfileName : fallbackLabel);
       setAuthUserId(user.id);
       setAuthEmail(user.email ?? "");
       setAuthPhone(user.phone ?? "");
@@ -677,7 +695,10 @@ export default function Page() {
         if (!byUserId.error && byUserId.data?.role) role = String(byUserId.data.role);
       }
 
-      if (mounted) setIsAdmin(role === "admin");
+      if (mounted) {
+        setIsAdmin(role === "admin");
+        setAuthReady(true);
+      }
     };
 
     loadRole();
@@ -688,7 +709,8 @@ export default function Page() {
       mounted = false;
       subscription.subscription.unsubscribe();
     };
-  }, []);
+  }, [authProfileName]);
+
 
   React.useEffect(() => {
     if (!authUserId) return;
@@ -742,6 +764,7 @@ export default function Page() {
       }));
 
       if (firstName) {
+        setAuthProfileName(firstName);
         setAuthLabel(firstName);
       }
     };
@@ -766,10 +789,22 @@ export default function Page() {
           bg_color: next.bg_color || null,
           bg_image_url: next.bg_image_url || null,
         };
-        const { error } = await supabase
+        const modern = await supabase
           .from("ui_zone_styles")
           .upsert(payload, { onConflict: "zone,mode" });
-        if (error) throw error;
+        if (modern.error) {
+          // Legacy compatibility: older schema may not have "mode" or composite conflict.
+          const legacyPayload = {
+            zone: zoneEditorTarget,
+            bg_type: next.bg_type,
+            bg_color: next.bg_color || null,
+            bg_image_url: next.bg_image_url || null,
+          };
+          const legacy = await supabase
+            .from("ui_zone_styles")
+            .upsert(legacyPayload, { onConflict: "zone" });
+          if (legacy.error) throw legacy.error;
+        }
         setZoneStylesByMode((prev) => {
           const updated = {
             ...prev,
@@ -835,7 +870,13 @@ export default function Page() {
       const { error } = await supabase
         .from("ui_branding")
         .upsert(payload, { onConflict: "id" });
-      if (error) throw error;
+      if (error) {
+        // Legacy compatibility: keep a single shared logo_url when per-mode columns are absent.
+        const legacy = await supabase
+          .from("ui_branding")
+          .upsert({ id: 1, logo_url: nextUrl || null }, { onConflict: "id" });
+        if (legacy.error) throw legacy.error;
+      }
       setLogoUrlsByMode((prev) => {
         const updated = { ...prev, [themeMode]: nextUrl };
         window.localStorage.setItem("tp_logo_urls_by_mode", JSON.stringify(updated));
@@ -925,18 +966,80 @@ export default function Page() {
 
       try {
         setZoneEditorError("");
-        const payload = { mode: themeMode, ...cleaned };
-        const { error: updateError, data: updatedRows } = await supabase
-          .from("ui_theme_colors")
-          .update(payload)
-          .eq("mode", themeMode)
-          .select("mode");
-        if (updateError) throw updateError;
-        if (!updatedRows || updatedRows.length === 0) {
-          const { error: insertError } = await supabase
+        const modernPayload = { mode: themeMode, ...cleaned };
+        let saved = false;
+
+        // Attempt 1: full modern schema (mode + all color fields).
+        {
+          const { error: updateError, data: updatedRows } = await supabase
             .from("ui_theme_colors")
-            .insert(payload);
-          if (insertError) throw insertError;
+            .update(modernPayload)
+            .eq("mode", themeMode)
+            .select("mode");
+          if (!updateError) {
+            if (!updatedRows || updatedRows.length === 0) {
+              const { error: insertError } = await supabase
+                .from("ui_theme_colors")
+                .insert(modernPayload);
+              if (!insertError) saved = true;
+            } else {
+              saved = true;
+            }
+          }
+        }
+
+        // Attempt 2: legacy-ish schema with fewer columns.
+        if (!saved) {
+          const reducedPayload = {
+            mode: themeMode,
+            accent_color: cleaned.accent_color,
+            text_color: cleaned.text_color,
+            line_color: cleaned.line_color,
+            button_border_color: cleaned.button_border_color,
+            button_bg_color: cleaned.button_bg_color,
+          };
+          const { error: updateError, data: updatedRows } = await supabase
+            .from("ui_theme_colors")
+            .update(reducedPayload)
+            .eq("mode", themeMode)
+            .select("mode");
+          if (!updateError) {
+            if (!updatedRows || updatedRows.length === 0) {
+              const { error: insertError } = await supabase
+                .from("ui_theme_colors")
+                .insert(reducedPayload);
+              if (!insertError) saved = true;
+            } else {
+              saved = true;
+            }
+          }
+        }
+
+        // Attempt 3: very old schema without mode (single row config).
+        if (!saved) {
+          const legacyPayload = {
+            accent_color: cleaned.accent_color,
+            text_color: cleaned.text_color,
+            line_color: cleaned.line_color,
+            button_border_color: cleaned.button_border_color,
+            button_bg_color: cleaned.button_bg_color,
+          };
+          const { error: updateError } = await supabase
+            .from("ui_theme_colors")
+            .update(legacyPayload)
+            .not("accent_color", "is", null);
+          if (!updateError) {
+            saved = true;
+          } else {
+            const { error: insertError } = await supabase
+              .from("ui_theme_colors")
+              .insert(legacyPayload);
+            if (!insertError) saved = true;
+          }
+        }
+
+        if (!saved) {
+          throw new Error("Unable to save theme colors (schema or RLS mismatch).");
         }
         return true;
       } catch (e) {
@@ -1017,6 +1120,15 @@ export default function Page() {
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
   }, []);
+
+  React.useEffect(() => {
+    if (!authReady) return;
+    if (authUserId) return;
+    if (!pendingRouteRef.current) return;
+    setAuthOpen(true);
+    closePrimaryDrawers();
+    setCartOpen(false);
+  }, [authReady, authUserId, closePrimaryDrawers]);
 
   const isPrimaryDrawerOpen = React.useMemo(
     () => panel !== null || detailsOpen || ordersOpen || allOrdersOpen || !!orderDrawerSource,
@@ -1102,37 +1214,106 @@ React.useEffect(() => {
   // ----------------------------
   // Filtered products + selection
   // ----------------------------
-  const normalizeType = React.useCallback(
+  const normalizeFilterValue = React.useCallback(
     (value: unknown) => String(value ?? "").trim().toLowerCase(),
     []
   );
+  const filterGroups = React.useMemo(
+    () =>
+      [
+        {
+          key: "type" as const,
+          label: "Type",
+          valueOf: (p: DbProduct) => String(p.type ?? "").trim() || "Other",
+        },
+        {
+          key: "cut" as const,
+          label: "Cuts",
+          valueOf: (p: DbProduct) => String(p.cut ?? "").trim(),
+        },
+        {
+          key: "country" as const,
+          label: "Country",
+          valueOf: (p: DbProduct) => String(p.country_of_origin ?? "").trim(),
+        },
+        {
+          key: "preparation" as const,
+          label: "Preparation",
+          valueOf: (p: DbProduct) => String(p.preparation ?? "").trim(),
+        },
+        {
+          key: "temperature" as const,
+          label: "Temperature",
+          valueOf: (p: DbProduct) => String(p.temperature ?? "").trim(),
+        },
+      ] as const,
+    []
+  );
 
-  const productTypes = React.useMemo(() => {
-    const map = new Map<string, string>();
-    for (const p of products) {
-      const raw = String(p.type ?? "").trim();
-      const key = normalizeType(raw) || "other";
-      if (!map.has(key)) map.set(key, raw || "Other");
+  const filterOptionsByGroup = React.useMemo(() => {
+    const next: Record<FilterKey, Array<{ key: string; label: string }>> = {
+      type: [],
+      cut: [],
+      country: [],
+      preparation: [],
+      temperature: [],
+    };
+    for (const group of filterGroups) {
+      const map = new Map<string, string>();
+      for (const product of products) {
+        const label = group.valueOf(product);
+        if (!label) continue;
+        const key = normalizeFilterValue(label);
+        if (!key) continue;
+        if (!map.has(key)) map.set(key, label);
+      }
+      next[group.key] = [...map.entries()]
+        .map(([key, label]) => ({ key, label }))
+        .sort((a, b) => a.label.localeCompare(b.label));
     }
-    return [...map.entries()]
-      .map(([key, label]) => ({ key, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [normalizeType, products]);
+    return next;
+  }, [filterGroups, normalizeFilterValue, products]);
 
   React.useEffect(() => {
-    const valid = new Set(productTypes.map((t) => t.key));
-    setSelectedTypes((prev) => prev.filter((t) => valid.has(t)));
-  }, [productTypes]);
+    setSelectedFilters((prev) => {
+      const next: Record<FilterKey, string[]> = {
+        type: [],
+        cut: [],
+        country: [],
+        preparation: [],
+        temperature: [],
+      };
+      let changed = false;
+      (Object.keys(next) as FilterKey[]).forEach((key) => {
+        const valid = new Set(filterOptionsByGroup[key].map((option) => option.key));
+        next[key] = (prev[key] ?? []).filter((value) => valid.has(value));
+        if (next[key].length !== (prev[key] ?? []).length) changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [filterOptionsByGroup]);
+
+  const selectedFilterCount = React.useMemo(
+    () =>
+      (Object.values(selectedFilters) as string[][]).reduce(
+        (sum, values) => sum + values.length,
+        0
+      ),
+    [selectedFilters]
+  );
 
   const filteredProducts = React.useMemo(() => {
     const q = search.trim();
-    const hasTypeFilter = selectedTypes.length > 0;
     return products.filter((p) => {
-      const typeKey = normalizeType(p.type) || "other";
-      const typeOk = !hasTypeFilter || selectedTypes.includes(typeKey);
-      return typeOk && matchesProductQuery(p, q);
+      const matchesFilters = filterGroups.every((group) => {
+        const selectedValues = selectedFilters[group.key];
+        if (!selectedValues.length) return true;
+        const valueKey = normalizeFilterValue(group.valueOf(p));
+        return !!valueKey && selectedValues.includes(valueKey);
+      });
+      return matchesFilters && matchesProductQuery(p, q);
     });
-  }, [normalizeType, products, search, selectedTypes]);
+  }, [filterGroups, normalizeFilterValue, products, search, selectedFilters]);
 
   const selectedProduct = React.useMemo(() => {
     if (!selectedId) return null;
@@ -1173,6 +1354,7 @@ React.useEffect(() => {
   const logout = React.useCallback(async () => {
     await supabase.auth.signOut();
     setAuthLabel(null);
+    setAuthProfileName("");
     setAuthUserId(null);
     setAuthEmail("");
     setAuthPhone("");
@@ -1226,6 +1408,8 @@ React.useEffect(() => {
   }, [closePrimaryDrawers, isAdmin]);
 
   const openProduct = React.useCallback((id: string, opts?: { skipNavigate?: boolean }) => {
+    windowScrollTopRef.current =
+      typeof window !== "undefined" ? window.scrollY || window.pageYOffset || 0 : 0;
     listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
     setSelectedId(id);
     setDetailsOpen(false);
@@ -1243,6 +1427,8 @@ React.useEffect(() => {
   const openEditProduct = React.useCallback(
     (id: string, opts?: { skipNavigate?: boolean }) => {
       if (!isAdmin) return;
+      windowScrollTopRef.current =
+        typeof window !== "undefined" ? window.scrollY || window.pageYOffset || 0 : 0;
       listScrollTopRef.current = listScrollRef.current?.scrollTop ?? 0;
       setEditorReturnToProduct(panel === "product");
       setSelectedId(id);
@@ -1293,8 +1479,13 @@ React.useEffect(() => {
       return;
     }
     closePrimaryDrawers();
-    const el = listScrollRef.current;
-    if (el) el.scrollTop = listScrollTopRef.current;
+    requestAnimationFrame(() => {
+      const el = listScrollRef.current;
+      if (el) el.scrollTop = listScrollTopRef.current;
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: windowScrollTopRef.current, left: 0, behavior: "auto" });
+      }
+    });
   }, [closePrimaryDrawers, editorReturnToProduct, selectedId]);
 
   const updateProductStatus = React.useCallback(
@@ -1328,8 +1519,13 @@ React.useEffect(() => {
 
   const backToList = React.useCallback(() => {
     closePrimaryDrawers();
-    const el = listScrollRef.current;
-    if (el) el.scrollTop = listScrollTopRef.current;
+    requestAnimationFrame(() => {
+      const el = listScrollRef.current;
+      if (el) el.scrollTop = listScrollTopRef.current;
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: windowScrollTopRef.current, left: 0, behavior: "auto" });
+      }
+    });
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", "/shop");
     }
@@ -1573,12 +1769,11 @@ React.useEffect(() => {
   }, [closePrimaryDrawers]);
 
   const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
-    closePrimaryDrawers();
     setCartOpen(true);
     if (!opts?.skipNavigate && typeof window !== "undefined") {
       window.history.pushState({}, "", "/cart");
     }
-  }, [closePrimaryDrawers]);
+  }, []);
 
   const openShop = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     closePrimaryDrawers();
@@ -1602,6 +1797,7 @@ React.useEffect(() => {
         const requireAuth = (next: { path: string; search: string }) => {
           if (authUserId) return true;
           pendingRouteRef.current = next;
+          if (!authReady) return false;
           setAuthOpen(true);
           closePrimaryDrawers();
           setCartOpen(false);
@@ -1935,6 +2131,37 @@ React.useEffect(() => {
     [openProduct]
   );
 
+  const toggleFilterOption = React.useCallback((group: FilterKey, key: string) => {
+    setSelectedFilters((prev) => {
+      const current = prev[group] ?? [];
+      const nextValues = current.includes(key)
+        ? current.filter((value) => value !== key)
+        : [...current, key];
+      return { ...prev, [group]: nextValues };
+    });
+  }, []);
+
+  const clearAllFilters = React.useCallback(() => {
+    setSelectedFilters({
+      type: [],
+      cut: [],
+      country: [],
+      preparation: [],
+      temperature: [],
+    });
+  }, []);
+
+  const scrollGridToTop = React.useCallback(() => {
+    const el = listScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
+  const hideMobileChromeForFullDrawer =
+    isMobileViewport &&
+    (panel === "product" || panel === "edit" || panel === "checkout");
+  const mobileFullDrawerTopOffset = hideMobileChromeForFullDrawer ? 0 : topOffset;
+  const showPageLoader = !isMainBgReady || loadingProducts;
+
   return (
     <div
       data-tp-mode={themeMode}
@@ -1948,32 +2175,51 @@ React.useEffect(() => {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        @keyframes tp-pulse {
-          0%, 100% { opacity: 0.4; }
-          50% { opacity: 1; }
+        .tp-filter-checkbox {
+          opacity: 0.8;
+        }
+        .tp-filter-checkbox:checked {
+          opacity: 1;
         }
       `}</style>
-      {!isMainBgReady ? (
+      {showPageLoader ? (
         <div style={styles.loaderWrap} aria-label="Loading">
           <div style={styles.loaderSpinner} />
-          <div style={styles.loaderText}>Loading...</div>
         </div>
       ) : null}
       <div
         style={{
           ...styles.pageInner,
-          opacity: isMainBgReady ? 1 : 0,
-          visibility: isMainBgReady ? "visible" : "hidden",
-          pointerEvents: isMainBgReady ? "auto" : "none",
+          opacity: showPageLoader ? 0 : 1,
+          visibility: showPageLoader ? "hidden" : "visible",
+          pointerEvents: showPageLoader ? "none" : "auto",
         }}
       >
       {/* Header */}
+      {!hideMobileChromeForFullDrawer ? (
       <div ref={headerRef} style={{ ...styles.headerWrap, ...headerZoneStyle }}>
-        <div style={styles.headerInner}>
+        <div
+          style={{
+            ...styles.headerInner,
+            ...(isMobileViewport ? { minHeight: mobileLogoHeight } : null),
+          }}
+        >
           {null}
           <div style={styles.brandWrap}>
             {(logoUrlsByMode[themeMode] ?? "").trim() ? (
-              <img src={(logoUrlsByMode[themeMode] ?? "").trim()} alt="Tasty Protein logo" style={styles.brandLogo} />
+              <img
+                src={(logoUrlsByMode[themeMode] ?? "").trim()}
+                alt="Tasty Protein logo"
+                style={{
+                  ...styles.brandLogo,
+                  ...(isMobileViewport
+                    ? {
+                        height: mobileLogoHeight,
+                        maxWidth: "min(63vw, 527px)",
+                      }
+                    : null),
+                }}
+              />
             ) : null}
             {isAdmin && editMode ? (
               <button
@@ -2003,14 +2249,15 @@ React.useEffect(() => {
           ) : null}
         </div>
       </div>
+      ) : null}
 
       {/* Navbar */}
+      {!hideMobileChromeForFullDrawer && !(isMobileViewport && mobileFiltersOpen) ? (
       <div ref={navRef}>
         <Navbar
           search={search}
           setSearch={setSearch}
           totalUnits={totalUnits}
-          subtotal={subtotal}
           onOpenCart={() => {
             openCart();
           }}
@@ -2032,12 +2279,12 @@ React.useEffect(() => {
           navTone={navbarTone}
           zoneStyle={navbarDisplayStyle}
           showZoneEditor={false}
-          formatMoney={formatMoney}
           searchStartOffset={isMobileViewport ? 0 : desktopNavLeftWidth}
           isMobile={isMobileViewport}
           showSearch={!isPrimaryDrawerOpen && panel === null && !detailsOpen}
         />
       </div>
+      ) : null}
 
       {/* Products list */}
       {!isPrimaryDrawerOpen ? (
@@ -2105,14 +2352,22 @@ React.useEffect(() => {
                     gridTemplateColumns: "1fr",
                   }
                 : {
-                    ["--tp-center-col" as string]: `min(980px, calc(var(--tp-rail-width) - ${desktopNavLeftWidth}px))`,
+                    ["--tp-center-col" as string]: desktopCenterColWidthCss,
+                    ["--tp-side-col" as string]: desktopSideColWidthCss,
                     width: "var(--tp-rail-width)",
-                    gridTemplateColumns: `calc((var(--tp-rail-width) - var(--tp-center-col)) / 2 - ${desktopNavGap / 2}px) var(--tp-center-col)`,
+                    gridTemplateColumns: `var(--tp-side-col) var(--tp-center-col) var(--tp-side-col)`,
                   }),
             }}
           >
             {!isMobileViewport ? (
-              <aside style={styles.filterPanel}>
+              <aside
+                style={{
+                  ...styles.filterPanel,
+                  maxHeight: `calc(100vh - ${topOffset + 30}px)`,
+                }}
+                onWheel={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+              >
                 {isAdmin && adminAllProductsMode ? (
                   <button
                     type="button"
@@ -2122,39 +2377,54 @@ React.useEffect(() => {
                     CREATE
                   </button>
                 ) : null}
-                <div style={styles.filterTitle}>FILTERS</div>
-                <div style={styles.filterActions}>
-                  <button
-                    type="button"
-                    style={styles.filterActionBtn}
-                    onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
-                  >
-                    All
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.filterActionBtn}
-                    onClick={() => setSelectedTypes([])}
-                  >
-                    None
-                  </button>
+                <div style={styles.filterHeaderRow}>
+                  <div style={{ ...styles.filterTitle, ...styles.filterTitleInline }}>FILTERS</div>
+                  {selectedFilterCount > 0 ? (
+                    <button
+                      type="button"
+                      style={styles.filterClearText}
+                      onClick={() => {
+                        clearAllFilters();
+                        scrollGridToTop();
+                      }}
+                      aria-label="Clear filters"
+                      title="Clear filters"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
                 </div>
-                <div style={styles.filterList}>
-                  {productTypes.map((typeItem) => (
-                    <label key={typeItem.key} style={styles.filterItem}>
-                      <input
-                        type="checkbox"
-                        checked={selectedTypes.includes(typeItem.key)}
-                        onChange={() =>
-                          setSelectedTypes((prev) =>
-                            prev.includes(typeItem.key)
-                              ? prev.filter((t) => t !== typeItem.key)
-                              : [...prev, typeItem.key]
-                          )
-                        }
-                      />
-                      <span>{typeItem.label}</span>
-                    </label>
+                <div style={styles.filterScrollArea}>
+                  {filterGroups.map((group, index) => (
+                    <div
+                      key={group.key}
+                      style={{
+                        ...styles.filterGroup,
+                        ...(index === 0 ? styles.filterGroupFirst : null),
+                      }}
+                    >
+                      <div style={styles.filterSubheader}>{group.label}</div>
+                      <div style={styles.filterList}>
+                        {filterOptionsByGroup[group.key].map((option) => (
+                          <label
+                            key={`${group.key}-${option.key}`}
+                            style={{ ...styles.filterItem, ...styles.filterItemDesktop }}
+                          >
+                            <input
+                              className="tp-filter-checkbox"
+                              style={styles.filterCheckboxDesktop}
+                              type="checkbox"
+                              checked={selectedFilters[group.key].includes(option.key)}
+                              onChange={() => {
+                                toggleFilterOption(group.key, option.key);
+                                scrollGridToTop();
+                              }}
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </aside>
@@ -2181,6 +2451,33 @@ React.useEffect(() => {
                 formatMoney={formatMoney}
               />
             </div>
+
+            {!isMobileViewport ? (
+              <aside
+                style={styles.summaryPanel}
+                role="button"
+                tabIndex={0}
+                aria-label="Open cart"
+                onClick={() => openCart()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openCart();
+                  }
+                }}
+              >
+                <div style={styles.summaryRows}>
+                  <div style={styles.summaryRow}>
+                    <span>Items</span>
+                    <span>{totalUnits}</span>
+                  </div>
+                  <div style={{ ...styles.summaryRow, ...styles.summaryTotalRow }}>
+                    <span>Total</span>
+                    <span>₱ {formatMoney(subtotal)}</span>
+                  </div>
+              </div>
+              </aside>
+            ) : null}
           </div>
 
           {isMobileViewport ? (
@@ -2188,7 +2485,7 @@ React.useEffect(() => {
               type="button"
               style={{
                 ...styles.mobileFilterFab,
-                ...(selectedTypes.length > 0 ? styles.mobileFilterFabActive : null),
+                ...(selectedFilterCount > 0 ? styles.mobileFilterFabActive : null),
               }}
               onClick={() => setMobileFiltersOpen((v) => !v)}
               aria-label="Open filters"
@@ -2202,8 +2499,8 @@ React.useEffect(() => {
                   strokeLinecap="round"
                 />
               </svg>
-              {selectedTypes.length > 0 ? (
-                <span style={styles.mobileFilterBadge}>{selectedTypes.length}</span>
+              {selectedFilterCount > 0 ? (
+                <span style={styles.mobileFilterBadge}>{selectedFilterCount}</span>
               ) : null}
             </button>
           ) : null}
@@ -2214,9 +2511,35 @@ React.useEffect(() => {
             >
               <aside
                 className="tp-sheet-slide-up"
-                style={styles.mobileFilterModal}
+                style={{ ...styles.mobileFilterModal, ...(mainZoneStyle ?? null) }}
                 onClick={(e) => e.stopPropagation()}
               >
+                <div style={styles.mobileFilterTopRow}>
+                  <div style={{ ...styles.filterHeaderRow, ...styles.mobileFilterHeaderRow }}>
+                    <div style={{ ...styles.filterTitle, ...styles.filterTitleInline }}>FILTERS</div>
+                    {selectedFilterCount > 0 ? (
+                      <button
+                        type="button"
+                        style={styles.filterClearText}
+                        onClick={() => {
+                          clearAllFilters();
+                          scrollGridToTop();
+                        }}
+                        aria-label="Clear filters"
+                        title="Clear filters"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    style={styles.mobileFilterTopCloseBtn}
+                    onClick={() => setMobileFiltersOpen(false)}
+                  >
+                    CLOSE
+                  </button>
+                </div>
                 {isAdmin && adminAllProductsMode ? (
                   <button
                     type="button"
@@ -2226,48 +2549,33 @@ React.useEffect(() => {
                     CREATE
                   </button>
                 ) : null}
-                <div style={styles.filterTitle}>FILTERS</div>
-                <div style={styles.filterActions}>
-                  <button
-                    type="button"
-                    style={styles.filterActionBtn}
-                    onClick={() => setSelectedTypes(productTypes.map((t) => t.key))}
-                  >
-                    All
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.filterActionBtn}
-                    onClick={() => setSelectedTypes([])}
-                  >
-                    None
-                  </button>
-                </div>
-                <div style={styles.filterList}>
-                  {productTypes.map((typeItem) => (
-                    <label key={typeItem.key} style={styles.filterItem}>
-                      <input
-                        type="checkbox"
-                        checked={selectedTypes.includes(typeItem.key)}
-                        onChange={() =>
-                          setSelectedTypes((prev) =>
-                            prev.includes(typeItem.key)
-                              ? prev.filter((t) => t !== typeItem.key)
-                              : [...prev, typeItem.key]
-                          )
-                        }
-                      />
-                      <span>{typeItem.label}</span>
-                    </label>
+                <div style={styles.mobileFilterScrollArea}>
+                  {filterGroups.map((group) => (
+                    <div key={group.key} style={styles.filterGroup}>
+                      <div style={styles.filterSubheader}>{group.label}</div>
+                      <div style={styles.filterList}>
+                        {filterOptionsByGroup[group.key].map((option) => (
+                          <label
+                            key={`${group.key}-${option.key}`}
+                            style={{ ...styles.filterItem, ...styles.filterItemMobile }}
+                          >
+                            <input
+                              className="tp-filter-checkbox"
+                              style={styles.filterCheckboxMobile}
+                              type="checkbox"
+                              checked={selectedFilters[group.key].includes(option.key)}
+                              onChange={() => {
+                                toggleFilterOption(group.key, option.key);
+                                scrollGridToTop();
+                              }}
+                            />
+                            <span>{option.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  style={styles.mobileFilterCloseBtn}
-                  onClick={() => setMobileFiltersOpen(false)}
-                >
-                  CLOSE
-                </button>
               </aside>
             </div>
           ) : null}
@@ -2277,7 +2585,7 @@ React.useEffect(() => {
       {/* Product drawer */}
       <ProductDrawer
         isOpen={panel === "product"}
-        topOffset={topOffset}
+        topOffset={mobileFullDrawerTopOffset}
         product={selectedProduct}
         images={selectedProductImages}
         qty={selectedId ? cart[selectedId] ?? 0 : 0}
@@ -2291,7 +2599,7 @@ React.useEffect(() => {
 
       <ProductEditorDrawer
         isOpen={panel === "edit"}
-        topOffset={topOffset}
+        topOffset={mobileFullDrawerTopOffset}
         product={selectedProduct}
         images={selectedProductImages}
         onClose={closeEditor}
@@ -2328,7 +2636,7 @@ React.useEffect(() => {
       {/* Checkout drawer */}
       <CheckoutDrawer
         isOpen={panel === "checkout"}
-        topOffset={topOffset}
+        topOffset={mobileFullDrawerTopOffset}
         items={cartItemsForDisplay}
         total={subtotal}
         customer={customer as CustomerDraft}
@@ -2356,7 +2664,7 @@ React.useEffect(() => {
         items={cartItemsForDisplay}
         subtotal={subtotal}
         backgroundStyle={mainZoneStyle}
-        onClose={() => openShop()}
+        onClose={() => setCartOpen(false)}
         onOpenProduct={handleCartOpenProduct as (id: string) => void}
         onAdd={addToCart}
         onRemove={removeFromCart}
@@ -2517,12 +2825,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 44,
     height: 44,
     borderRadius: "50%",
-    border: "3px solid rgba(255,255,255,0.2)",
-    borderTopColor: "#ffffff",
+    border: "3px solid rgba(102,199,255,0.25)",
+    borderTopColor: "var(--tp-accent, #66c7ff)",
     animation: "tp-spin 1s linear infinite",
-  },
-  loaderText: {
-    animation: "tp-pulse 1.2s ease-in-out infinite",
   },
   headerWrap: {
     position: "sticky",
@@ -2533,13 +2838,13 @@ const styles: Record<string, React.CSSProperties> = {
   },
   headerInner: {
     position: "relative",
-    minHeight: 116,
+    minHeight: 136,
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
     alignItems: "center",
     gap: 0,
-    padding: "28px 0 8px",
+    padding: "0",
   },
   brandWrap: {
     display: "inline-flex",
@@ -2570,8 +2875,8 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.9,
   },
   brandLogo: {
-    height: 81,
-    maxWidth: "min(61.2vw, 504px)",
+    height: 136,
+    maxWidth: "min(79vw, 655px)",
     width: "auto",
     objectFit: "contain",
   },
@@ -2674,10 +2979,49 @@ const styles: Record<string, React.CSSProperties> = {
     position: "sticky",
     top: 14,
     marginTop: 16,
+    overflow: "hidden",
     border: "none",
     borderRadius: 12,
     padding: "15px 15px 15px 0",
     background: "transparent",
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+  },
+  filterScrollArea: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    overscrollBehaviorY: "contain",
+    paddingRight: 4,
+  },
+  summaryPanel: {
+    position: "sticky",
+    top: 14,
+    marginTop: 16,
+    border: "none",
+    borderRadius: 12,
+    padding: "15px 0 15px 15px",
+    background: "transparent",
+    display: "grid",
+    gap: 12,
+    alignSelf: "start",
+  },
+  summaryRows: {
+    display: "grid",
+    gap: 4,
+  },
+  summaryRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: 15,
+    opacity: 0.92,
+  },
+  summaryTotalRow: {
+    paddingTop: 0,
+    marginTop: 0,
+    opacity: 1,
   },
   createBtn: {
     height: 34,
@@ -2701,9 +3045,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 40,
     height: 40,
     borderRadius: 999,
-    border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg)",
-    color: "var(--tp-text-color)",
+    border: "1px solid var(--tp-accent)",
+    background: "var(--tp-accent)",
+    color: "#ffffff",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2712,9 +3056,9 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 6px 18px rgba(0,0,0,0.28)",
   },
   mobileFilterFabActive: {
-    border: "1px solid #66c7ff",
-    color: "#66c7ff",
-    background: "rgba(102,199,255,0.12)",
+    border: "1px solid var(--tp-accent)",
+    color: "#ffffff",
+    background: "var(--tp-accent)",
   },
   mobileFilterBadge: {
     position: "absolute",
@@ -2723,10 +3067,10 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 16,
     height: 16,
     borderRadius: 999,
-    background: "#66c7ff",
-    color: "#ffffff",
+    background: "#ffffff",
+    color: "#000000",
     border: "1px solid rgba(0,0,0,0.16)",
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 800,
     lineHeight: "15px",
     padding: "0 4px",
@@ -2742,8 +3086,8 @@ const styles: Record<string, React.CSSProperties> = {
   mobileFilterModalBackdrop: {
     position: "fixed",
     inset: 0,
-    zIndex: 1000,
-    background: "rgba(135,135,135,0.94)",
+    zIndex: 1600,
+    background: "transparent",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
@@ -2753,13 +3097,22 @@ const styles: Record<string, React.CSSProperties> = {
   mobileFilterModal: {
     width: "min(520px, calc(100vw - 20px))",
     maxHeight: "80vh",
-    overflowY: "auto",
+    overflow: "hidden",
     border: "1px solid var(--tp-border-color)",
     borderRadius: 12,
-    padding: 12,
-    background: "#d3d3d3",
-    display: "grid",
+    padding: 20,
+    background: "var(--tp-page-bg)",
+    display: "flex",
+    flexDirection: "column",
     gap: 10,
+  },
+  mobileFilterScrollArea: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    overscrollBehaviorY: "contain",
+    paddingRight: 2,
+    marginTop: 30,
   },
   mobileFilterCloseBtn: {
     marginTop: 4,
@@ -2773,30 +3126,78 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 1,
     cursor: "pointer",
   },
+  mobileFilterTopRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 0,
+  },
+  mobileFilterHeaderRow: {
+    justifyContent: "flex-start",
+    gap: 15,
+    marginBottom: 0,
+  },
+  mobileFilterTopCloseBtn: {
+    width: 68,
+    minWidth: 68,
+    height: 36,
+    padding: 0,
+    borderRadius: 8,
+    fontSize: 16,
+    fontWeight: 700,
+    letterSpacing: 1,
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    textAlign: "right",
+    cursor: "pointer",
+  },
   filterTitle: {
     fontSize: 16,
     fontWeight: 900,
     letterSpacing: 1.1,
     marginBottom: 20,
   },
-  filterActions: {
+  filterTitleInline: {
+    marginBottom: 0,
+  },
+  filterHeaderRow: {
     display: "flex",
-    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 20,
   },
-  filterActionBtn: {
-    height: 28,
-    borderRadius: 8,
-    border: "1px solid var(--tp-border-color)",
+  filterClearText: {
+    border: "none",
     background: "transparent",
-    color: "var(--tp-text-color)",
-    fontSize: 15,
-    padding: "0 8px",
+    boxShadow: "none",
+    color: "var(--tp-accent)",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 0.4,
     cursor: "pointer",
+    padding: 0,
+    outline: "none",
+    appearance: "none",
   },
   filterList: {
     display: "grid",
     gap: 8,
+  },
+  filterGroup: {
+    display: "grid",
+    gap: 8,
+    marginTop: 20,
+  },
+  filterGroupFirst: {
+    marginTop: 0,
+  },
+  filterSubheader: {
+    fontSize: 15,
+    fontWeight: 800,
+    letterSpacing: 0.4,
+    opacity: 0.95,
+    marginTop: 6,
   },
   filterItem: {
     display: "flex",
@@ -2805,6 +3206,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     minHeight: 24,
     cursor: "pointer",
+  },
+  filterItemDesktop: {
+    fontSize: 14,
+  },
+  filterItemMobile: {
+    fontSize: 16,
+  },
+  filterCheckboxDesktop: {
+    transform: "scale(1.08)",
+    transformOrigin: "left center",
+    marginLeft: 10,
+    marginRight: 4,
+  },
+  filterCheckboxMobile: {
+    transform: "scale(1.2)",
+    transformOrigin: "left center",
+    marginLeft: 20,
+    marginRight: 4,
   },
   gridWrap: {
     minWidth: 0,

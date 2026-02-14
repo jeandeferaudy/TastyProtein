@@ -15,6 +15,7 @@ export type DbProduct = {
   temperature: string | null;
   country_of_origin: string | null;
   selling_price: number | null; // numeric in Supabase
+  product_cost?: number | null;
   thumbnail_url?: string | null;
   keywords: string | null;
   status: string | null; // <-- use status instead of is_active
@@ -75,6 +76,12 @@ export async function fetchProducts(options?: {
           : r["selling_price"] == null
             ? null
             : Number(r["selling_price"]),
+      product_cost:
+        typeof r["product_cost"] === "number"
+          ? (r["product_cost"] as number)
+          : r["product_cost"] == null
+            ? null
+            : Number(r["product_cost"]),
       thumbnail_url: (r["thumbnail_url"] as string | null) ?? null,
       keywords: (r["keywords"] as string | null) ?? null,
       status: (r["status"] as string | null) ?? null,

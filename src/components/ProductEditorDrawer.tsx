@@ -30,6 +30,7 @@ type Draft = {
   temperature: string;
   country_of_origin: string;
   selling_price: string;
+  product_cost: string;
   thumbnail_url: string;
   keywords: string;
   status: string;
@@ -94,6 +95,7 @@ function toDraft(p: DbProduct): Draft {
     temperature: p.temperature ?? "",
     country_of_origin: p.country_of_origin ?? "",
     selling_price: p.selling_price != null ? String(p.selling_price) : "",
+    product_cost: p.product_cost != null ? String(p.product_cost) : "",
     thumbnail_url: p.thumbnail_url ?? "",
     keywords: p.keywords ?? "",
     status: uiStatus,
@@ -118,6 +120,10 @@ function formatAutoSizeText(rawAmount: string, unit: SizeUnit): string {
   return unit === "g" ? `${n} g` : `${n} ml`;
 }
 
+function reindexRows(rows: ImageRow[]) {
+  return rows.map((row, index) => ({ ...row, sort_order: index + 1 }));
+}
+
 export default function ProductEditorDrawer({
   isOpen,
   topOffset,
@@ -132,19 +138,44 @@ export default function ProductEditorDrawer({
   const [imageRows, setImageRows] = React.useState<ImageRow[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
-  const [dragOverUpload, setDragOverUpload] = React.useState(false);
-  const [draggingId, setDraggingId] = React.useState<string | null>(null);
   const [sizeUnit, setSizeUnit] = React.useState<SizeUnit>("g");
   const [error, setError] = React.useState("");
   const [savedNoticeAt, setSavedNoticeAt] = React.useState<number>(0);
   const [deleting, setDeleting] = React.useState(false);
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const lastSavedSnapshotRef = React.useRef<string>("");
+  const liveSnapshotRef = React.useRef<string>("");
+  const currentProductIdRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (!draft) {
+      liveSnapshotRef.current = "";
+      return;
+    }
+    liveSnapshotRef.current = JSON.stringify({
+      draft,
+      sizeUnit,
+      images: reindexRows(imageRows).map((row) => ({
+        sort_order: row.sort_order,
+        url: row.url.trim(),
+      })),
+    });
+  }, [draft, imageRows, sizeUnit]);
 
   React.useEffect(() => {
     if (!product) {
       setDraft(null);
       setImageRows([]);
+      currentProductIdRef.current = null;
+      return;
+    }
+    const incomingProductId = String(product.id);
+    const isSameProduct = currentProductIdRef.current === incomingProductId;
+    const hasUnsavedLocalChanges =
+      !!liveSnapshotRef.current &&
+      liveSnapshotRef.current !== lastSavedSnapshotRef.current;
+    if (isSameProduct && hasUnsavedLocalChanges) {
+      // Ignore background product refresh while user has unsaved local typing.
       return;
     }
     setDraft(toDraft(product));
@@ -165,6 +196,8 @@ export default function ProductEditorDrawer({
         .map((img) => ({ sort_order: img.sort_order, url: img.url.trim() })),
     });
     lastSavedSnapshotRef.current = initialSnapshot;
+    liveSnapshotRef.current = initialSnapshot;
+    currentProductIdRef.current = incomingProductId;
   }, [product, images]);
 
   React.useEffect(() => {
@@ -179,6 +212,20 @@ export default function ProductEditorDrawer({
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
   const autoSizeText = formatAutoSizeText(draft.size_g, sizeUnit);
+  const sellingPriceValue = Number(draft.selling_price.trim());
+  const productCostValue = Number(draft.product_cost.trim());
+  const hasValidMargin =
+    Number.isFinite(sellingPriceValue) &&
+    Number.isFinite(productCostValue) &&
+    sellingPriceValue > 0 &&
+    productCostValue >= 0;
+  const marginPct = hasValidMargin
+    ? ((sellingPriceValue - productCostValue) / sellingPriceValue) * 100
+    : null;
+  const marginValue =
+    marginPct == null ? "—" : `${marginPct.toFixed(2).replace(".", ",")}%`;
+  const mainFieldRowStyle = isMobileViewport ? styles.mainFieldRowMobile : styles.mainFieldRow;
+  const mainFieldLabelStyle = isMobileViewport ? styles.mainFieldLabelMobile : styles.mainFieldLabel;
 
   const setField = (k: keyof Draft, v: string) => setDraft((prev) => (prev ? { ...prev, [k]: v } : prev));
 
@@ -187,25 +234,6 @@ export default function ProductEditorDrawer({
       const next = prev.filter((row) => row.id !== id);
       void saveWith({ imageRowsOverride: next });
       return next;
-    });
-  };
-
-  const reindexRows = (rows: ImageRow[]) => {
-    return rows.map((row, index) => ({ ...row, sort_order: index + 1 }));
-  };
-
-  const reorderImage = (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    setImageRows((prev) => {
-      const fromIndex = prev.findIndex((r) => r.id === fromId);
-      const toIndex = prev.findIndex((r) => r.id === toId);
-      if (fromIndex < 0 || toIndex < 0) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      const reindexed = reindexRows(next);
-      void saveWith({ imageRowsOverride: reindexed });
-      return reindexed;
     });
   };
 
@@ -346,10 +374,12 @@ export default function ProductEditorDrawer({
     setSaving(true);
     try {
       const selling = activeDraft.selling_price.trim() ? Number(activeDraft.selling_price) : null;
+      const cost = activeDraft.product_cost.trim() ? Number(activeDraft.product_cost) : null;
       const sizeG = activeDraft.size_g.trim() ? Number(activeDraft.size_g) : null;
       const sortValue = activeDraft.sort.trim() ? Number(activeDraft.sort) : null;
 
       if (selling != null && Number.isNaN(selling)) throw new Error("Selling price must be a number.");
+      if (cost != null && Number.isNaN(cost)) throw new Error("Product cost must be a number.");
       if (sizeG != null && Number.isNaN(sizeG)) throw new Error("Size (g) must be a number.");
       if (sortValue != null && Number.isNaN(sortValue)) throw new Error("Sort must be a number.");
 
@@ -361,13 +391,14 @@ export default function ProductEditorDrawer({
         description: activeDraft.description || null,
         type: activeDraft.type || null,
         cut: activeDraft.cut || null,
-        preparationa: activeDraft.preparation || null,
+        preparation: activeDraft.preparation || null,
         packaging: activeDraft.packaging || null,
         size: computedSizeText || null,
         size_g: sizeG,
         temperature: activeDraft.temperature || null,
         country_of_origin: activeDraft.country_of_origin || null,
         selling_price: selling,
+        product_cost: cost,
         thumbnail_url: activeDraft.thumbnail_url || null,
         keywords: autoKeywords || null,
         status: activeDraft.status || null,
@@ -490,31 +521,29 @@ export default function ProductEditorDrawer({
           height: panelHeight,
         }}
       >
-        <div style={styles.topRow}>
+        <div style={{ ...styles.topRow, ...(isMobileViewport ? styles.topRowMobile : null) }}>
           <AppButton variant="ghost" style={styles.backBtn} onClick={onClose}>
             BACK
           </AppButton>
           <div style={styles.title}>EDIT PRODUCT</div>
+          <div style={styles.topStatusWrap}>
+            {saving ? <div style={styles.savingHint}>Saving…</div> : null}
+            {!saving && savedNoticeAt > 0 ? <div style={styles.savedHint}>Saved</div> : null}
+          </div>
         </div>
 
         <div
           style={{
             ...styles.content,
-            ...(isMobileViewport ? { padding: "8px 10px 20px" } : null),
+            ...(isMobileViewport ? styles.contentMobile : null),
           }}
         >
-          <div style={styles.grid}>
+          <div style={{ ...styles.grid, ...(isMobileViewport ? styles.gridMobile : null) }}>
             <div style={styles.card}>
               <div style={styles.section}>IMAGES</div>
-              <label style={styles.label}>Thumbnail URL</label>
-              <input
-                style={styles.input}
-                value={draft.thumbnail_url}
-                onChange={(e) => setField("thumbnail_url", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <div style={styles.inlineTools}>
-                <label style={styles.fileUploadLabel}>
+              <div style={styles.thumbHeaderRow}>
+                <label style={{ ...styles.label, margin: 0 }}>Thumbnail URL</label>
+                <label style={{ ...styles.fileUploadLabel, ...styles.uploadBtnFixed }}>
                   Upload Thumbnail
                   <input
                     type="file"
@@ -524,25 +553,15 @@ export default function ProductEditorDrawer({
                   />
                 </label>
               </div>
-              <div
-                style={{
-                  ...styles.dropZone,
-                  ...(dragOverUpload ? styles.dropZoneActive : null),
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOverUpload(true);
-                }}
-                onDragLeave={() => setDragOverUpload(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOverUpload(false);
-                  void handleImageFiles(e.dataTransfer.files);
-                }}
-              >
-                <div>{uploading ? "Uploading..." : "Drag & drop images here"}</div>
-                <label style={styles.fileUploadLabel}>
-                  + Upload Images
+              <input
+                style={styles.input}
+                value={draft.thumbnail_url}
+                onChange={(e) => setField("thumbnail_url", e.target.value)}
+                onBlur={handleAutoSave}
+              />
+              <div style={styles.imagesUploadRow}>
+                <label style={{ ...styles.fileUploadLabel, ...styles.uploadBtnFixed }}>
+                  {uploading ? "Uploading..." : "Upload Images"}
                   <input
                     type="file"
                     accept="image/*"
@@ -558,14 +577,6 @@ export default function ProductEditorDrawer({
                 <div
                   key={row.id}
                   style={styles.imageRow}
-                  draggable
-                  onDragStart={() => setDraggingId(row.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (draggingId) reorderImage(draggingId, row.id);
-                    setDraggingId(null);
-                  }}
                 >
                   <div style={styles.previewWrap}>
                     {row.url.trim() ? (
@@ -601,146 +612,195 @@ export default function ProductEditorDrawer({
                         inputMode="numeric"
                         onBlur={handleAutoSave}
                       />
+                      <button
+                        type="button"
+                        style={styles.orderBtn}
+                        onClick={() => moveImage(row.id, -1)}
+                        aria-label="Move image up"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.orderBtn}
+                        onClick={() => moveImage(row.id, 1)}
+                        aria-label="Move image down"
+                      >
+                        ▼
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.removeBtn}
+                        onClick={() => removeImage(row.id)}
+                        aria-label="Delete image"
+                        title="Delete image"
+                      >
+                        <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true">
+                          <path
+                            d="M9 4h6l1 2h4v2H4V6h4l1-2Zm1 6h2v8h-2v-8Zm4 0h2v8h-2v-8ZM8 10h2v8H8v-8Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                  <div style={styles.rowTools}>
-                    <button
-                      type="button"
-                      style={styles.orderBtn}
-                      onClick={() => moveImage(row.id, -1)}
-                      aria-label="Move image up"
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      style={styles.orderBtn}
-                      onClick={() => moveImage(row.id, 1)}
-                      aria-label="Move image down"
-                    >
-                      ▼
-                    </button>
-                  </div>
-                  <div style={styles.dragHandle}>DRAG</div>
-                  <AppButton
-                    variant="ghost"
-                    style={styles.removeBtn}
-                    onClick={() => removeImage(row.id)}
-                  >
-                    DELETE
-                  </AppButton>
                 </div>
               ))}
             </div>
 
             <div style={styles.card}>
               <div style={styles.section}>MAIN FIELDS</div>
-              <label style={styles.label}>Short name (tiles)</label>
-              <input
-                style={styles.input}
-                value={draft.name}
-                onChange={(e) => setField("name", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Long name (list + drawer)</label>
-              <input
-                style={styles.input}
-                value={draft.long_name}
-                onChange={(e) => setField("long_name", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Size</label>
-              <div style={styles.sizeRow}>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Short name (tiles)</label>
                 <input
                   style={styles.input}
-                  value={draft.size_g}
-                  onChange={(e) => setField("size_g", e.target.value)}
-                  inputMode="decimal"
-                  placeholder={sizeUnit === "g" ? "grams" : "milliliters"}
+                  value={draft.name}
+                  onChange={(e) => setField("name", e.target.value)}
                   onBlur={handleAutoSave}
                 />
-                <select
-                  value={sizeUnit}
-                  onChange={(e) => setSizeUnit(e.target.value as SizeUnit)}
-                  onBlur={handleAutoSave}
-                  style={styles.sizeUnitSelect}
-                  aria-label="Size unit"
-                >
-                  <option value="g">g</option>
-                  <option value="ml">ml</option>
-                </select>
-                <div style={styles.sizeTextReadOnly}>{autoSizeText || "—"}</div>
               </div>
-              <label style={styles.label}>Cut</label>
-              <input
-                style={styles.input}
-                value={draft.cut}
-                onChange={(e) => setField("cut", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Preparation</label>
-              <input
-                style={styles.input}
-                value={draft.preparation}
-                onChange={(e) => setField("preparation", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Status</label>
-              <select
-                style={{
-                  ...styles.input,
-                  ...styles.statusSelect,
-                  ...(draft.status === "Active"
-                    ? styles.statusActive
-                    : draft.status === "Disabled"
-                      ? styles.statusDisabled
-                      : styles.statusArchived),
-                }}
-                value={draft.status}
-                onChange={(e) => setField("status", e.target.value)}
-                onBlur={handleAutoSave}
-              >
-                {STATUS_OPTIONS.map((status) => (
-                  <option key={status} value={status} style={styles.statusOption}>
-                    {status.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-              <label style={styles.label}>Selling price</label>
-              <input
-                style={styles.input}
-                value={draft.selling_price}
-                onChange={(e) => setField("selling_price", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Packaging</label>
-              <input
-                style={styles.input}
-                value={draft.packaging}
-                onChange={(e) => setField("packaging", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Temperature</label>
-              <input
-                style={styles.input}
-                value={draft.temperature}
-                onChange={(e) => setField("temperature", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Country</label>
-              <input
-                style={styles.input}
-                value={draft.country_of_origin}
-                onChange={(e) => setField("country_of_origin", e.target.value)}
-                onBlur={handleAutoSave}
-              />
-              <label style={styles.label}>Description</label>
-              <textarea
-                style={styles.textarea}
-                value={draft.description}
-                onChange={(e) => setField("description", e.target.value)}
-                onBlur={handleAutoSave}
-              />
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Long name (list + drawer)</label>
+                <input
+                  style={styles.input}
+                  value={draft.long_name}
+                  onChange={(e) => setField("long_name", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Size</label>
+                <div style={styles.sizeRow}>
+                  <input
+                    style={styles.input}
+                    value={draft.size_g}
+                    onChange={(e) => setField("size_g", e.target.value)}
+                    inputMode="decimal"
+                    placeholder={sizeUnit === "g" ? "grams" : "milliliters"}
+                    onBlur={handleAutoSave}
+                  />
+                  <select
+                    value={sizeUnit}
+                    onChange={(e) => setSizeUnit(e.target.value as SizeUnit)}
+                    onBlur={handleAutoSave}
+                    style={styles.sizeUnitSelect}
+                    aria-label="Size unit"
+                  >
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                  </select>
+                  <div style={styles.sizeTextReadOnly}>{autoSizeText || "—"}</div>
+                </div>
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Cut</label>
+                <input
+                  style={styles.input}
+                  value={draft.cut}
+                  onChange={(e) => setField("cut", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Country</label>
+                <input
+                  style={styles.input}
+                  value={draft.country_of_origin}
+                  onChange={(e) => setField("country_of_origin", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Temperature</label>
+                <input
+                  style={styles.input}
+                  value={draft.temperature}
+                  onChange={(e) => setField("temperature", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Preparation</label>
+                <input
+                  style={styles.input}
+                  value={draft.preparation}
+                  onChange={(e) => setField("preparation", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Packaging</label>
+                <input
+                  style={styles.input}
+                  value={draft.packaging}
+                  onChange={(e) => setField("packaging", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Status</label>
+                <select
+                  style={{
+                    ...styles.input,
+                    ...styles.statusSelect,
+                    ...(draft.status === "Active"
+                      ? styles.statusActive
+                      : draft.status === "Disabled"
+                        ? styles.statusDisabled
+                        : styles.statusArchived),
+                  }}
+                  value={draft.status}
+                  onChange={(e) => setField("status", e.target.value)}
+                  onBlur={handleAutoSave}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status} style={styles.statusOption}>
+                      {status.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Selling price</label>
+                <input
+                  style={styles.input}
+                  value={draft.selling_price}
+                  onChange={(e) => setField("selling_price", e.target.value)}
+                  onBlur={handleAutoSave}
+                  placeholder="Selling price"
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Cost</label>
+                <div style={styles.priceCostRow}>
+                  <input
+                    style={styles.input}
+                    value={draft.product_cost}
+                    onChange={(e) => setField("product_cost", e.target.value)}
+                    onBlur={handleAutoSave}
+                    placeholder="Product cost"
+                  />
+                  <div style={styles.marginValue}>{marginValue}</div>
+                </div>
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Type</label>
+                <input
+                  style={styles.input}
+                  value={draft.type}
+                  onChange={(e) => setField("type", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <label style={styles.label}>Description</label>
+                <textarea
+                  style={styles.textarea}
+                  value={draft.description}
+                  onChange={(e) => setField("description", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
             </div>
           </div>
 
@@ -772,10 +832,6 @@ export default function ProductEditorDrawer({
           </div>
 
           {error ? <div style={styles.error}>{error}</div> : null}
-          <div style={styles.saveHintRow}>
-            {saving ? <div style={styles.savingHint}>Saving…</div> : null}
-            {!saving && savedNoticeAt > 0 ? <div style={styles.savedHint}>Saved</div> : null}
-          </div>
 
           <div style={styles.deleteRow}>
             <AppButton
@@ -818,7 +874,13 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 40,
+    width: "min(1228px, 100%)",
     padding: "18px 0 15px",
+  },
+  topRowMobile: {
+    minHeight: 56,
+    gap: 16,
+    padding: "8px 20px 10px",
   },
   backBtn: {
     width: 68,
@@ -840,16 +902,30 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 2,
     color: "#fff",
   },
+  topStatusWrap: {
+    marginLeft: "auto",
+    minHeight: 24,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
   content: {
     flex: 1,
     overflowY: "auto",
     padding: "8px 0 44px 108px",
+  },
+  contentMobile: {
+    padding: "8px 20px 20px",
   },
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: 22,
     maxWidth: "min(1120px, 100%)",
+  },
+  gridMobile: {
+    gridTemplateColumns: "1fr",
+    gap: 16,
   },
   card: {
     background: "transparent",
@@ -872,11 +948,51 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 10,
     marginBottom: 6,
   },
+  mainFieldRow: {
+    display: "grid",
+    gridTemplateColumns: "190px minmax(0,1fr)",
+    alignItems: "center",
+    columnGap: 12,
+    marginTop: 8,
+  },
+  mainFieldRowMobile: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    alignItems: "center",
+    rowGap: 4,
+    marginTop: 8,
+  },
+  mainFieldLabel: {
+    display: "block",
+    fontSize: 15,
+    opacity: 0.85,
+    margin: 0,
+  },
+  mainFieldLabelMobile: {
+    display: "block",
+    fontSize: 15,
+    opacity: 0.85,
+    margin: 0,
+  },
   sizeRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(120px, 1fr) 90px minmax(140px, 1fr)",
+    gridTemplateColumns: "minmax(0,1fr) 90px 140px",
     gap: 8,
     alignItems: "center",
+  },
+  priceCostRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0,1fr) 72px",
+    gap: 8,
+    alignItems: "center",
+  },
+  marginValue: {
+    minWidth: 0,
+    textAlign: "right",
+    fontSize: 15,
+    fontWeight: 700,
+    opacity: 0.9,
+    whiteSpace: "nowrap",
   },
   sizeUnitSelect: {
     height: 40,
@@ -888,6 +1004,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
   },
   sizeTextReadOnly: {
+    width: "100%",
+    boxSizing: "border-box",
     height: 40,
     borderRadius: 10,
     border: "1px solid rgba(255,255,255,0.15)",
@@ -896,7 +1014,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 15px",
     display: "flex",
     alignItems: "center",
-    fontWeight: 700,
+    fontWeight: 400,
     letterSpacing: 0.2,
   },
   input: {
@@ -956,6 +1074,20 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     gap: 8,
   },
+  thumbHeaderRow: {
+    marginTop: 10,
+    marginBottom: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  imagesUploadRow: {
+    marginTop: 20,
+    marginBottom: 12,
+    display: "flex",
+    justifyContent: "flex-end",
+  },
   fileUploadLabel: {
     display: "inline-flex",
     alignItems: "center",
@@ -969,25 +1101,12 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.8,
     cursor: "pointer",
   },
-  dropZone: {
-    border: "1px dashed rgba(255,255,255,0.22)",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-    fontSize: 15,
-    opacity: 0.85,
-  },
-  dropZoneActive: {
-    borderColor: "rgba(255,255,255,0.55)",
-    background: "rgba(255,255,255,0.05)",
+  uploadBtnFixed: {
+    width: 190,
   },
   imageRow: {
     display: "grid",
-    gridTemplateColumns: "70px minmax(0, 1fr) auto 52px auto",
+    gridTemplateColumns: "70px minmax(0, 1fr)",
     gap: 8,
     marginBottom: 8,
     alignItems: "center",
@@ -1012,21 +1131,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   imageFields: {
     minWidth: 0,
-  },
-  dragHandle: {
-    height: 70,
-    width: 52,
-    borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.05)",
-    color: "white",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 15,
-    cursor: "grab",
+    width: "100%",
   },
   urlInput: {
+    width: "100%",
     height: 36,
     borderRadius: 8,
     border: "1px solid rgba(255,255,255,0.15)",
@@ -1046,7 +1154,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   orderInput: {
     width: 56,
-    height: 28,
+    height: 36,
     borderRadius: 8,
     border: "1px solid rgba(255,255,255,0.15)",
     background: "rgba(255,255,255,0.05)",
@@ -1054,26 +1162,32 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 8px",
     fontSize: 15,
   },
-  rowTools: {
-    display: "grid",
-    gap: 4,
-  },
   orderBtn: {
-    width: 30,
-    height: 30,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)",
     color: "white",
-    fontSize: 15,
+    fontSize: 20,
+    lineHeight: 1,
     cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   removeBtn: {
-    height: 70,
+    height: 36,
+    width: 36,
     borderRadius: 8,
-    padding: "0 10px",
-    fontSize: 15,
-    letterSpacing: 0.8,
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(255,255,255,0.06)",
+    color: "white",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+    cursor: "pointer",
   },
   extraCard: {
     maxWidth: "min(1120px, 100%)",
@@ -1088,13 +1202,6 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 10,
     color: "#ff9292",
     fontSize: 15,
-  },
-  saveHintRow: {
-    marginTop: 12,
-    display: "flex",
-    justifyContent: "center",
-    maxWidth: "min(1120px, 100%)",
-    minHeight: 28,
   },
   savingHint: {
     fontSize: 15,

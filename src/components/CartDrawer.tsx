@@ -3,7 +3,7 @@
 
 import type React from "react";
 import type { CartItem } from "@/lib/cart";
-import { AppButton } from "@/components/ui";
+import { AppButton, QtyIcon } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 
 type Props = {
@@ -33,6 +33,8 @@ export default function CartDrawer({
   onCheckout,
   formatMoney,
 }: Props) {
+  const qtyCount = items.reduce((sum, i) => sum + Math.max(0, Number(i.qty) || 0), 0);
+
   return (
     <aside
       style={{
@@ -44,7 +46,7 @@ export default function CartDrawer({
       aria-hidden={!isOpen}
     >
       <div style={styles.header}>
-        <div style={styles.title}>Your Cart</div>
+        <div style={styles.title}>CART</div>
         <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button" aria-label="Close">
           CLOSE
         </AppButton>
@@ -81,7 +83,7 @@ export default function CartDrawer({
                   {[i.country, i.temperature].filter(Boolean).join(" • ") || "—"}
                 </div>
                 <div style={styles.perPiece}>
-                  ₱ {formatMoney(i.price)} / {i.size || "pc"}
+                  ₱ {formatMoney(i.price)} for {i.size || "pc"}
                 </div>
               </div>
 
@@ -98,7 +100,7 @@ export default function CartDrawer({
                       onRemove(String(i.productId));
                     }}
                   >
-                    <span style={styles.pmGlyph}>−</span>
+                    <QtyIcon type="minus" />
                   </AppButton>
 
                   <div
@@ -118,7 +120,7 @@ export default function CartDrawer({
                       onAdd(String(i.productId));
                     }}
                   >
-                    <span style={styles.pmGlyph}>+</span>
+                    <QtyIcon type="plus" />
                   </AppButton>
                 </div>
               </div>
@@ -128,6 +130,10 @@ export default function CartDrawer({
       </div>
 
       <div style={styles.footer}>
+        <div style={styles.metaRow}>
+          <div style={{ opacity: 0.8 }}>Items</div>
+          <div style={styles.metaValue}>{qtyCount}</div>
+        </div>
         <div style={styles.totalRow}>
           <div style={{ opacity: 0.8 }}>Subtotal</div>
           <div style={styles.totalValue}>₱ {formatMoney(subtotal)}</div>
@@ -160,9 +166,9 @@ const styles: Record<string, React.CSSProperties> = {
     // ✅ IMPORTANT: fully opaque panel (removes “faded” look)
     background: "transparent",
 
-    borderLeft: "none",
+    borderLeft: "1px solid rgba(255,255,255,0.3)",
     transition: "transform 220ms ease",
-    zIndex: 1400,
+    zIndex: 1700,
     display: "flex",
     flexDirection: "column",
     color: "var(--tp-text-color)",
@@ -174,7 +180,13 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     borderBottom: "1px solid var(--tp-border-color-soft)",
   },
-  title: { fontSize: 16, fontWeight: 800 },
+  title: {
+    fontSize: 16,
+    fontWeight: 900,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    lineHeight: 1,
+  },
   btn: {
     width: 68,
     minWidth: 68,
@@ -206,7 +218,7 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "56px 1fr auto",
     gap: 12,
     padding: "15px 0",
-    borderBottom: "1px solid var(--tp-border-color-soft)",
+    borderBottom: "1px solid rgba(255,255,255,0.3)",
     cursor: "pointer",
   },
   thumbWrap: {
@@ -244,12 +256,6 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     padding: 0,
   },
-  pmGlyph: {
-    fontSize: 20,
-    fontWeight: 900,
-    lineHeight: 1,
-    transform: "translateY(-1px)",
-  },
   qty: { fontSize: 15, fontWeight: 800, textAlign: "center" },
   footer: {
     padding: "16px 16px 36px",
@@ -260,6 +266,12 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     marginBottom: 12,
   },
+  metaRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  metaValue: { fontSize: 15, fontWeight: 600 },
   totalValue: { fontSize: 16, fontWeight: 900 },
   checkoutBtn: {
     width: "100%",
