@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import type { DbProduct, ProductImage } from "@/lib/products";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
@@ -888,7 +888,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     border: "none",
@@ -897,7 +897,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
   },
   title: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 2,
     color: "#fff",

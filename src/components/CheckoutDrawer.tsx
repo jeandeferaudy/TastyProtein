@@ -4,7 +4,7 @@
 import React, { useMemo } from "react";
 import type { Order } from "@/types/order";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
-import { AppButton, UI } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE, UI } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 import { supabase } from "@/lib/supabase";
 
@@ -94,6 +94,9 @@ type Props = {
     size: string | null;
     temperature?: string | null;
     thumbnailUrl?: string | null;
+    unlimitedStock?: boolean;
+    qtyAvailable?: number;
+    outOfStock?: boolean;
     price?: number;
     qty: number;
     lineTotal: number;
@@ -436,6 +439,7 @@ export default function CheckoutDrawer({
   const referBagFee = customer.add_refer_bag ? 200 : 0;
   const grandTotal = computedTotal + deliveryFee + referBagFee;
   const displayedTotal = checkoutStep === 1 ? computedTotal : grandTotal;
+  const hasOutOfStockItems = summaryLines.some((li: any) => Boolean(li?.outOfStock));
 
   const isCheckoutValid =
     customer.full_name.trim().length > 1 &&
@@ -450,7 +454,8 @@ export default function CheckoutDrawer({
     customer.delivery_date.trim().length > 0 &&
     customer.delivery_slot.trim().length > 0 &&
     (!isWithin2h || customer.express_delivery) &&
-    (!requiresProof || !!paymentFile);
+    (!requiresProof || !!paymentFile) &&
+    !summaryLines.some((li: any) => Boolean(li?.outOfStock));
   React.useEffect(() => {
     if (!isOpen) {
       setCheckoutStep(1);
@@ -475,13 +480,18 @@ export default function CheckoutDrawer({
   if (!customer.delivery_date.trim()) missingCustomer.push("delivery date");
   if (!customer.delivery_slot.trim()) missingCustomer.push("delivery time");
   const missingProof = requiresProof && !paymentFile;
-  const missingTotal = missingCustomer.length + (missingProof ? 1 : 0);
+  const missingStock = hasOutOfStockItems;
+  const missingTotal = missingCustomer.length + (missingProof ? 1 : 0) + (missingStock ? 1 : 0);
 
   let missingHint = "";
   if (missingTotal === 0) {
     missingHint = "Looks good. You can send your order.";
   } else if (missingTotal <= 2) {
-    const specific = [...missingCustomer, ...(missingProof ? ["payment proof"] : [])];
+    const specific = [
+      ...missingCustomer,
+      ...(missingProof ? ["payment proof"] : []),
+      ...(missingStock ? ["out-of-stock items removed"] : []),
+    ];
     missingHint = `Please add: ${specific.join(" and ")}.`;
   } else if (missingCustomer.length >= 3 && missingProof) {
     missingHint = "Please complete your customer details and upload payment proof.";
@@ -493,7 +503,9 @@ export default function CheckoutDrawer({
   const missingWhat =
     missingTotal === 1 && missingProof && missingCustomer.length === 0
       ? "payment proof"
-      : missingCustomer.length
+      : missingStock
+        ? "out-of-stock items removed"
+        : missingCustomer.length
         ? missingCustomer.length > 2
           ? "required details"
           : missingCustomer.join(" and ")
@@ -840,6 +852,11 @@ export default function CheckoutDrawer({
                       <div style={styles.summaryMiniTitle}>CART</div>
                       <div>{summaryQty} items</div>
                     </div>
+                    {hasOutOfStockItems ? (
+                      <div style={styles.stockWarnBox}>
+                        Some items are out of stock. Remove OOS items to continue checkout.
+                      </div>
+                    ) : null}
                   </div>
 
                   <div
@@ -1055,25 +1072,40 @@ export default function CheckoutDrawer({
                             </div>
                             <div style={styles.summaryRight}>
                               <div style={styles.summaryLineTotal}>₱ {formatMoney(li.lineTotal)}</div>
-                              <div style={styles.summaryPmRow}>
-                                <AppButton
-                                  variant="ghost"
-                                  style={{ ...styles.summaryPmBtn, opacity: li.qty > 0 ? 1 : 0.4 }}
-                                  disabled={li.qty <= 0 || !onRemoveItem}
-                                  onClick={() => onRemoveItem?.(String(li.productId))}
-                                >
-                                  <span style={styles.summaryPmGlyph}>−</span>
-                                </AppButton>
-                                <div style={styles.summaryQty}>{li.qty}</div>
-                                <AppButton
-                                  variant="ghost"
-                                  style={styles.summaryPmBtn}
-                                  disabled={!onAddItem}
-                                  onClick={() => onAddItem?.(String(li.productId))}
-                                >
-                                  <span style={styles.summaryPmGlyph}>+</span>
-                                </AppButton>
-                              </div>
+                              {li.outOfStock ? (
+                                <div style={styles.summaryOosGroup}>
+                                  <span style={styles.summaryOosLabel}>OOS</span>
+                                  <AppButton
+                                    variant="ghost"
+                                    style={{ ...styles.summaryPmBtn, opacity: li.qty > 0 ? 1 : 0.4 }}
+                                    disabled={li.qty <= 0 || !onRemoveItem}
+                                    onClick={() => onRemoveItem?.(String(li.productId))}
+                                  >
+                                    <span style={styles.summaryPmGlyph}>−</span>
+                                  </AppButton>
+                                  <div style={styles.summaryQty}>{li.qty}</div>
+                                </div>
+                              ) : (
+                                <div style={styles.summaryPmRow}>
+                                  <AppButton
+                                    variant="ghost"
+                                    style={{ ...styles.summaryPmBtn, opacity: li.qty > 0 ? 1 : 0.4 }}
+                                    disabled={li.qty <= 0 || !onRemoveItem}
+                                    onClick={() => onRemoveItem?.(String(li.productId))}
+                                  >
+                                    <span style={styles.summaryPmGlyph}>−</span>
+                                  </AppButton>
+                                  <div style={styles.summaryQty}>{li.qty}</div>
+                                  <AppButton
+                                    variant="ghost"
+                                    style={styles.summaryPmBtn}
+                                    disabled={!onAddItem}
+                                    onClick={() => onAddItem?.(String(li.productId))}
+                                  >
+                                    <span style={styles.summaryPmGlyph}>+</span>
+                                  </AppButton>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))
@@ -1565,7 +1597,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: TITLE_GAP,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     border: "none",
@@ -1575,7 +1607,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
 
   topTitle: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 2,
     marginRight: TITLE_GAP,
@@ -2179,6 +2211,27 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translateY(-1px)",
   },
   summaryQty: { fontSize: 15, fontWeight: 800, textAlign: "center" },
+  summaryOosGroup: {
+    display: "grid",
+    gridTemplateColumns: "auto 32px 32px",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "end",
+  },
+  summaryOosLabel: {
+    height: 28,
+    minWidth: 48,
+    borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(160,160,160,0.25)",
+    color: "rgba(255,255,255,0.82)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: 0.8,
+  },
 
   summaryTotalRow: {
     display: "flex",
@@ -2231,6 +2284,16 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 8,
     fontSize: 15,
     color: "#ffb14a",
+  },
+  stockWarnBox: {
+    marginTop: 8,
+    borderRadius: 10,
+    border: "1px solid rgba(255,177,74,0.6)",
+    background: "rgba(255,177,74,0.16)",
+    color: "#ffd79d",
+    padding: "8px 10px",
+    fontSize: 13,
+    lineHeight: 1.3,
   },
   datePickerWrap: {
     position: "relative",
@@ -2366,7 +2429,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
     color: "var(--tp-text-color)",
     padding: "15px 15px",
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     cursor: "pointer",
     width: "100%",

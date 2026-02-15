@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { supabase } from "@/lib/supabase";
-import { AppButton } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
 
 type Props = {
   isOpen: boolean;
@@ -351,7 +351,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 12,
   },
   title: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 2,
   },
@@ -361,7 +361,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",

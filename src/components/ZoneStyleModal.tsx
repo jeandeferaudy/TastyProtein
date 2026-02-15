@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
 
 export type ZoneStyleDraft = {
   bg_type: "color" | "image";
@@ -658,7 +658,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: -4,
   },
   title: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 1.4,
   },

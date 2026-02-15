@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
 import type { OrderDetail, OrderStatusPatch } from "@/lib/ordersApi";
 import type { DbProduct } from "@/lib/products";
 
@@ -844,7 +844,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     border: "none",
@@ -852,7 +852,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-start",
     textAlign: "left",
   },
-  title: { fontSize: 16, fontWeight: 900, letterSpacing: 1.4, color: "var(--tp-text-color)" },
+  title: { fontSize: TOPBAR_FONT_SIZE, fontWeight: 900, letterSpacing: 1.4, color: "var(--tp-text-color)" },
   content: {
     flex: 1,
     overflow: "hidden",

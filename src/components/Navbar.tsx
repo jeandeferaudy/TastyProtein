@@ -2,7 +2,12 @@
 "use client";
 
 import * as React from "react";
-import { AppButton, GearIcon } from "@/components/ui";
+import {
+  AppButton,
+  GearIcon,
+  TOPBAR_FONT_SIZE,
+  TOPBAR_FONT_SIZE_MOBILE,
+} from "@/components/ui";
 const NAV_CONTROL_H = 36;
 const NAV_SECTION_GAP = 12;
 const NAV_INLINE_GAP = 10;
@@ -25,6 +30,7 @@ type Props = {
   onToggleEditMode: (next: boolean) => void;
   onOpenAllOrders: () => void;
   onOpenAllProducts: () => void;
+  onOpenInventory: () => void;
   onLogout: () => void;
   navTone?: "dark-bg" | "light-bg";
   zoneStyle?: React.CSSProperties;
@@ -53,6 +59,7 @@ export default function Navbar({
   onToggleEditMode,
   onOpenAllOrders,
   onOpenAllProducts,
+  onOpenInventory,
   onLogout,
   navTone = "light-bg",
   zoneStyle,
@@ -211,7 +218,7 @@ export default function Navbar({
                           onOpenAllProducts();
                         }}
                       >
-                        All Products
+                        Products
                       </button>
 
                       <button
@@ -222,7 +229,18 @@ export default function Navbar({
                           onOpenAllOrders();
                         }}
                       >
-                        All Orders
+                        Orders
+                      </button>
+
+                      <button
+                        type="button"
+                        style={styles.menuItem}
+                        onClick={() => {
+                          setAuthMenuOpen(false);
+                          onOpenInventory();
+                        }}
+                      >
+                        Inventory
                       </button>
                     </>
                   )}
@@ -496,7 +514,8 @@ export default function Navbar({
               }}
               onClick={onOpenCart}
             >
-              {`CART (${Math.max(0, totalUnits)})`}
+              <span style={styles.cartLabelBold}>CART</span>
+              <span style={styles.cartLabelQty}>({Math.max(0, totalUnits)})</span>
             </AppButton>
           </div>
         </div>
@@ -579,13 +598,13 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 15px",
     borderRadius: 8,
     fontWeight: 700,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     border: "1px solid transparent",
     background: "transparent",
   },
   navBtnMobile: {
     height: 40,
-    fontSize: 15,
+    fontSize: TOPBAR_FONT_SIZE_MOBILE,
     padding: "0 15px",
     whiteSpace: "nowrap",
   },
@@ -608,6 +627,13 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 0 0 12px",
     border: "none",
     transform: "translateX(5px)",
+  },
+  cartLabelBold: {
+    fontWeight: 700,
+  },
+  cartLabelQty: {
+    fontWeight: 400,
+    marginLeft: 4,
   },
   cartWrapMobile: {
     gridColumn: "2 / 3",
@@ -654,7 +680,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     gap: 5,
-    color: "#ffffff",
+    color: "var(--tp-accent)",
     background: "transparent",
     cursor: "pointer",
     padding: "0 6px",
@@ -663,6 +689,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: 130,
   },
   userName: {
+    color: "var(--tp-accent)",
     maxWidth: 90,
     overflow: "hidden",
     textOverflow: "ellipsis",

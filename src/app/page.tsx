@@ -13,6 +13,7 @@ import AuthModal from "@/components/AuthModal";
 import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
+import InventoryDrawer, { type InventoryLine } from "@/components/InventoryDrawer";
 import ZoneStyleModal, {
   type ZoneStyleDraft,
   type ThemeColorsDraft,
@@ -190,6 +191,9 @@ export default function Page() {
   const [detailsOpen, setDetailsOpen] = React.useState<boolean>(false);
   const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
   const [allOrdersOpen, setAllOrdersOpen] = React.useState<boolean>(false);
+  const [inventoryOpen, setInventoryOpen] = React.useState<boolean>(false);
+  const [inventoryRows, setInventoryRows] = React.useState<InventoryLine[]>([]);
+  const [loadingInventory, setLoadingInventory] = React.useState<boolean>(false);
   const [editMode, setEditMode] = React.useState<boolean>(false);
   const [myOrders, setMyOrders] = React.useState<MyOrderItem[]>([]);
   const [allOrders, setAllOrders] = React.useState<MyOrderItem[]>([]);
@@ -427,6 +431,30 @@ export default function Page() {
       const safeProducts = Array.isArray(p) ? p : [];
       const ids = safeProducts.map((item) => String(item.id));
       const allImages = await fetchProductImages(ids);
+      const inventoryResult = ids.length
+        ? await supabase
+            .from("inventory")
+            .select("product_id,qty_on_hand,qty_allocated,qty_available")
+            .in("product_id", ids)
+        : { data: [], error: null as unknown };
+      if (inventoryResult.error) {
+        console.warn("[page] inventory fetch failed:", inventoryResult.error);
+      }
+      const inventoryById = new Map<
+        string,
+        { qty_on_hand: number; qty_allocated: number; qty_available: number }
+      >();
+      for (const row of (inventoryResult.data ?? []) as Array<Record<string, unknown>>) {
+        const id = String(row.product_id ?? "");
+        if (!id) continue;
+        const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
+        const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
+        inventoryById.set(id, {
+          qty_on_hand: qtyOnHand,
+          qty_allocated: qtyAllocated,
+          qty_available: Math.max(qtyOnHand - qtyAllocated, 0),
+        });
+      }
 
       const imagesById: Record<string, ProductImage[]> = {};
       for (const img of allImages) {
@@ -443,9 +471,13 @@ export default function Page() {
         const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
         const firstImage = images[0]?.url ?? null;
         const ownThumb = prod.thumbnail_url?.trim() || null;
+        const inventory = inventoryById.get(pid);
         return {
           ...prod,
           thumbnail_url: ownThumb ?? orderOne ?? firstImage,
+          qty_on_hand: inventory?.qty_on_hand ?? 0,
+          qty_allocated: inventory?.qty_allocated ?? 0,
+          qty_available: inventory?.qty_available ?? 0,
         };
       });
 
@@ -1117,6 +1149,7 @@ export default function Page() {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setInventoryOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
   }, []);
@@ -1131,8 +1164,14 @@ export default function Page() {
   }, [authReady, authUserId, closePrimaryDrawers]);
 
   const isPrimaryDrawerOpen = React.useMemo(
-    () => panel !== null || detailsOpen || ordersOpen || allOrdersOpen || !!orderDrawerSource,
-    [allOrdersOpen, detailsOpen, orderDrawerSource, ordersOpen, panel]
+    () =>
+      panel !== null ||
+      detailsOpen ||
+      ordersOpen ||
+      allOrdersOpen ||
+      inventoryOpen ||
+      !!orderDrawerSource,
+    [allOrdersOpen, detailsOpen, inventoryOpen, orderDrawerSource, ordersOpen, panel]
   );
 
   React.useEffect(() => {
@@ -1172,6 +1211,7 @@ React.useEffect(() => {
     async (productId: string, nextQty: number) => {
       const sessionId = sessionIdRef.current;
       if (!sessionId || sessionId === "server") return;
+      const requested = Math.max(nextQty, 0);
 
       // optimistic local update
       setCart((prev: Cart.CartState) => {
@@ -1209,6 +1249,12 @@ React.useEffect(() => {
       await changeQty(id, Math.max(cur - 1, 0));
     },
     [cart, changeQty]
+  );
+  const setQtyInCart = React.useCallback(
+    async (id: string, qty: number) => {
+      await changeQty(id, Math.max(0, Math.floor(Number(qty) || 0)));
+    },
+    [changeQty]
   );
 
   // ----------------------------
@@ -1323,22 +1369,39 @@ React.useEffect(() => {
   const cartItemsForDisplay = React.useMemo(() => {
     const enriched = cartItems.map((item) => {
       const product = products.find((p) => String(p.id) === item.productId);
-      if (item.temperature && item.thumbnailUrl) return item;
       return {
         ...item,
         country: item.country ?? product?.country_of_origin ?? null,
         type: product?.type ?? null,
         temperature: product?.temperature ?? null,
         thumbnailUrl: item.thumbnailUrl ?? product?.thumbnail_url ?? null,
+        unlimitedStock: Boolean(product?.unlimited_stock),
+        qtyAvailable: Math.max(0, Number(product?.qty_available ?? 0)),
+        outOfStock:
+          !Boolean(product?.unlimited_stock) &&
+          Math.max(0, Number(product?.qty_available ?? 0)) < 1,
       };
     });
     return enriched.sort((a, b) => {
       const typeA = String(a.type ?? "").toLowerCase();
       const typeB = String(b.type ?? "").toLowerCase();
       if (typeA !== typeB) return typeA.localeCompare(typeB);
-      return String(a.name ?? "").localeCompare(String(b.name ?? ""));
+      const nameCmp = String(a.name ?? "").localeCompare(String(b.name ?? ""));
+      if (nameCmp !== 0) return nameCmp;
+      const sizeCmp = String(a.size ?? "").localeCompare(String(b.size ?? ""));
+      if (sizeCmp !== 0) return sizeCmp;
+      return String(a.productId ?? "").localeCompare(String(b.productId ?? ""));
     });
   }, [cartItems, products]);
+  const hasCartQtyOverLimit = React.useMemo(
+    () =>
+      cartItemsForDisplay.some(
+        (it) =>
+          !Boolean(it.unlimitedStock) &&
+          Math.max(0, Number(it.qty) || 0) > Math.max(0, Number(it.qtyAvailable ?? 0))
+      ),
+    [cartItemsForDisplay]
+  );
 
   // ----------------------------
   // UI navigation
@@ -1364,8 +1427,10 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setInventoryOpen(false);
     setMyOrders([]);
     setAllOrders([]);
+    setInventoryRows([]);
     setSelectedMyOrderId(null);
     setSelectedAllOrderId(null);
     setOrderDrawerSource(null);
@@ -1415,6 +1480,7 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setInventoryOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
     setPanel("product");
@@ -1435,6 +1501,7 @@ React.useEffect(() => {
       setDetailsOpen(false);
       setOrdersOpen(false);
       setAllOrdersOpen(false);
+      setInventoryOpen(false);
       setOrderDrawerSource(null);
       setSelectedOrderDetail(null);
       setPanel("edit");
@@ -1590,14 +1657,19 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setInventoryOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
+    if (hasCartQtyOverLimit) {
+      alert("You need to reduce some quantites in your cart.");
+      return;
+    }
     void loadProfileForCheckout();
     setPanel("checkout");
     if (!opts?.skipNavigate && typeof window !== "undefined") {
       window.history.pushState({}, "", "/checkout");
     }
-  }, [authEmail, authPhone, authUserId]);
+  }, [authEmail, authPhone, authUserId, hasCartQtyOverLimit]);
 
   const openProfileDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     closePrimaryDrawers();
@@ -1768,12 +1840,318 @@ React.useEffect(() => {
     }
   }, [closePrimaryDrawers]);
 
+  const loadInventoryRows = React.useCallback(async () => {
+    setLoadingInventory(true);
+    try {
+      const allProducts = await fetchProducts({ includeInactive: true });
+      const safeProducts = Array.isArray(allProducts) ? allProducts : [];
+      const ids = safeProducts.map((item) => String(item.id));
+      const allImages = ids.length ? await fetchProductImages(ids) : [];
+      const { data, error } = await supabase
+        .from("inventory")
+        .select("product_id,qty_on_hand,qty_allocated,qty_available");
+      if (error) throw error;
+
+      const byProductId = new Map<
+        string,
+        { qty_on_hand: number; qty_allocated: number; qty_available: number }
+      >();
+      for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+        const id = String(row.product_id ?? "");
+        if (!id) continue;
+        const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
+        const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
+        byProductId.set(id, {
+          qty_on_hand: qtyOnHand,
+          qty_allocated: qtyAllocated,
+          qty_available: Math.max(qtyOnHand - qtyAllocated, 0),
+        });
+      }
+
+      const imagesById: Record<string, ProductImage[]> = {};
+      for (const img of allImages) {
+        const pid = String(img.product_id);
+        if (!imagesById[pid]) imagesById[pid] = [];
+        imagesById[pid].push(img);
+      }
+
+      const nextRows: InventoryLine[] = safeProducts
+        .map((p) => {
+          const id = String(p.id);
+          const inv = byProductId.get(id) ?? {
+            qty_on_hand: 0,
+            qty_allocated: 0,
+            qty_available: 0,
+          };
+          const images = (imagesById[id] ?? []).slice().sort((a, b) => a.sort_order - b.sort_order);
+          const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
+          const firstImage = images[0]?.url ?? null;
+          const ownThumb = p.thumbnail_url?.trim() || null;
+          return {
+            product_id: id,
+            name: String(p.long_name ?? p.name ?? "Unnamed item"),
+            status: String(p.status ?? ""),
+            format: String(p.size ?? "").trim(),
+            preparation: String(p.preparation ?? "").trim(),
+            temperature: String(p.temperature ?? "").trim(),
+            thumbnail_url: ownThumb ?? orderOne ?? firstImage,
+            unlimited_stock: Boolean(p.unlimited_stock),
+            qty_on_hand: inv.qty_on_hand,
+            qty_allocated: inv.qty_allocated,
+            qty_available: inv.qty_available,
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setInventoryRows(nextRows);
+    } catch (e) {
+      console.error("Failed to load inventory", e);
+      setInventoryRows([]);
+    } finally {
+      setLoadingInventory(false);
+    }
+  }, []);
+
+  const handleInventoryUnlimitedChange = React.useCallback(
+    async (productId: string, next: boolean) => {
+      const { error } = await supabase
+        .from("products")
+        .update({ unlimited_stock: next })
+        .eq("id", productId);
+      if (error) {
+        alert(error.message);
+        throw error;
+      }
+      setProducts((prev) =>
+        prev.map((p) => (String(p.id) === productId ? { ...p, unlimited_stock: next } : p))
+      );
+      setInventoryRows((prev) =>
+        prev.map((row) =>
+          row.product_id === productId ? { ...row, unlimited_stock: next } : row
+        )
+      );
+    },
+    []
+  );
+
+  const handleInventoryQtyOnHandChange = React.useCallback(
+    async (productId: string, next: number) => {
+      const safeQty = Math.max(0, Math.floor(Number(next) || 0));
+      const allocatedRead = await supabase
+        .from("inventory")
+        .select("qty_allocated")
+        .eq("product_id", productId)
+        .maybeSingle();
+
+      if (allocatedRead.error) {
+        const message = allocatedRead.error.message ?? "Failed to read current allocated inventory.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      const allocatedFromDb = Math.max(0, Number(allocatedRead.data?.qty_allocated ?? 0));
+
+      const persist = await supabase
+        .from("inventory")
+        .upsert(
+          {
+            product_id: productId,
+            qty_on_hand: safeQty,
+          },
+          { onConflict: "product_id" }
+        );
+
+      if (persist.error) {
+        const message = persist.error.message ?? "Failed to update inventory.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      const availableFromDb = Math.max(safeQty - allocatedFromDb, 0);
+      setInventoryRows((prev) =>
+        prev.map((row) =>
+          row.product_id === productId
+            ? {
+                ...row,
+                qty_on_hand: safeQty,
+                qty_allocated: allocatedFromDb,
+                qty_available: availableFromDb,
+              }
+            : row
+        )
+      );
+      setProducts((prev) =>
+        prev.map((p) =>
+          String(p.id) === productId
+            ? {
+                ...p,
+                qty_on_hand: safeQty,
+                qty_allocated: allocatedFromDb,
+                qty_available: availableFromDb,
+              }
+            : p
+        )
+      );
+    },
+    []
+  );
+
+  const handleInventoryBulkUnlimitedChange = React.useCallback(
+    async (productIds: string[], next: boolean) => {
+      const ids = [...new Set(productIds.map((id) => String(id)).filter(Boolean))];
+      if (!ids.length) return;
+      const { error } = await supabase
+        .from("products")
+        .update({ unlimited_stock: next })
+        .in("id", ids);
+      if (error) {
+        alert(error.message);
+        throw error;
+      }
+      const idSet = new Set(ids);
+      setProducts((prev) =>
+        prev.map((p) =>
+          idSet.has(String(p.id)) ? { ...p, unlimited_stock: next } : p
+        )
+      );
+      setInventoryRows((prev) =>
+        prev.map((row) =>
+          idSet.has(row.product_id) ? { ...row, unlimited_stock: next } : row
+        )
+      );
+    },
+    []
+  );
+
+  const handleInventoryBulkQtyOnHandChange = React.useCallback(
+    async (productIds: string[], next: number) => {
+      const ids = [...new Set(productIds.map((id) => String(id)).filter(Boolean))];
+      if (!ids.length) return;
+      const safeQty = Math.max(0, Math.floor(Number(next) || 0));
+      const idSet = new Set(ids);
+      const allocResponse = await supabase
+        .from("inventory")
+        .select("product_id,qty_allocated")
+        .in("product_id", ids);
+
+      if (allocResponse.error) {
+        const message = allocResponse.error.message ?? "Failed to read current inventory allocation.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      const allocatedById = new Map<string, number>();
+      for (const row of (allocResponse.data ?? []) as Array<Record<string, unknown>>) {
+        const id = String(row.product_id ?? "");
+        if (!id) continue;
+        allocatedById.set(id, Math.max(0, Number(row.qty_allocated ?? 0)));
+      }
+
+      const payload = ids.map((id) => {
+        return {
+          product_id: id,
+          qty_on_hand: safeQty,
+        };
+      });
+
+      const persist = await supabase
+        .from("inventory")
+        .upsert(payload, { onConflict: "product_id" });
+
+      if (persist.error) {
+        const message = persist.error.message ?? "Failed to bulk update inventory.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      setProducts((prev) =>
+        prev.map((p) => {
+          const id = String(p.id);
+          if (!idSet.has(id)) return p;
+          const allocated = allocatedById.get(id) ?? 0;
+          return {
+            ...p,
+            qty_on_hand: safeQty,
+            qty_allocated: allocated,
+            qty_available: Math.max(safeQty - allocated, 0),
+          };
+        })
+      );
+      setInventoryRows((prev) =>
+        prev.map((row) => {
+          if (!idSet.has(row.product_id)) return row;
+          const allocated = allocatedById.get(row.product_id) ?? 0;
+          return {
+            ...row,
+            qty_on_hand: safeQty,
+            qty_allocated: allocated,
+            qty_available: Math.max(safeQty - allocated, 0),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const openInventoryDrawer = React.useCallback(
+    (opts?: { skipNavigate?: boolean }) => {
+      if (!isAdmin) return;
+      closePrimaryDrawers();
+      setCartOpen(false);
+      void loadInventoryRows();
+      setInventoryOpen(true);
+      if (!opts?.skipNavigate && typeof window !== "undefined") {
+        window.history.pushState({}, "", "/inventory");
+      }
+    },
+    [closePrimaryDrawers, isAdmin, loadInventoryRows]
+  );
+
   const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    setInventoryOpen(false);
     setCartOpen(true);
     if (!opts?.skipNavigate && typeof window !== "undefined") {
       window.history.pushState({}, "", "/cart");
     }
   }, []);
+
+  const resolveRouteWithoutCart = React.useCallback(() => {
+    if (panel === "checkout") return "/checkout";
+    if ((panel === "product" || panel === "edit") && selectedId) {
+      const params = new URLSearchParams({ id: String(selectedId) });
+      return `/shop/product?${params.toString()}`;
+    }
+    if (orderDrawerSource && selectedOrderDetail?.id) {
+      const params = new URLSearchParams({ id: String(selectedOrderDetail.id) });
+      return `/order?${params.toString()}`;
+    }
+    if (inventoryOpen) return "/inventory";
+    if (allOrdersOpen) return "/allorders";
+    if (ordersOpen) return "/myorders";
+    if (detailsOpen) return "/profile";
+    if (isAdmin && adminAllProductsMode) return "/allproducts";
+    return "/shop";
+  }, [
+    adminAllProductsMode,
+    allOrdersOpen,
+    detailsOpen,
+    inventoryOpen,
+    isAdmin,
+    orderDrawerSource,
+    ordersOpen,
+    panel,
+    selectedId,
+    selectedOrderDetail?.id,
+  ]);
+
+  const closeCart = React.useCallback(() => {
+    setCartOpen(false);
+    if (typeof window === "undefined") return;
+    const next = resolveRouteWithoutCart();
+    const current = `${window.location.pathname}${window.location.search}`;
+    if (current !== next) {
+      window.history.pushState({}, "", next);
+    }
+  }, [resolveRouteWithoutCart]);
 
   const openShop = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     closePrimaryDrawers();
@@ -1805,6 +2183,14 @@ React.useEffect(() => {
         };
 
         const requireAdmin = (next: { path: string; search: string }) => {
+          pendingRouteRef.current = next;
+          if (!authReady) return false;
+          if (!authUserId) {
+            setAuthOpen(true);
+            closePrimaryDrawers();
+            setCartOpen(false);
+            return false;
+          }
           if (isAdmin) return true;
           pendingRouteRef.current = null;
           closePrimaryDrawers();
@@ -1829,6 +2215,7 @@ React.useEffect(() => {
           return;
         }
         if (path === "/cart") {
+          closePrimaryDrawers();
           openCart({ skipNavigate: true });
           return;
         }
@@ -1869,6 +2256,11 @@ React.useEffect(() => {
           openAllProductsView({ skipNavigate: true });
           return;
         }
+        if (path === "/inventory") {
+          // Inventory is intentionally opened only from the user menu action.
+          openShop({ skipNavigate: true });
+          return;
+        }
 
         openShop({ skipNavigate: true });
       } finally {
@@ -1876,6 +2268,7 @@ React.useEffect(() => {
       }
     },
     [
+      authReady,
       authUserId,
       closePrimaryDrawers,
       isAdmin,
@@ -1902,11 +2295,11 @@ React.useEffect(() => {
   }, [applyRouteFromLocation]);
 
   React.useEffect(() => {
-    if (!authUserId || !pendingRouteRef.current) return;
+    if (!authReady || !pendingRouteRef.current) return;
     const next = pendingRouteRef.current;
     pendingRouteRef.current = null;
     applyRouteFromLocation(next.path, next.search);
-  }, [applyRouteFromLocation, authUserId]);
+  }, [applyRouteFromLocation, authReady, authUserId, isAdmin]);
 
   const composeAddress = React.useCallback((draft: CustomerDraft) => {
     const d = draft as Record<string, unknown>;
@@ -2125,7 +2518,6 @@ React.useEffect(() => {
 
   const handleCartOpenProduct: (id: string) => void = React.useCallback(
     (id: string) => {
-      setCartOpen(false);
       openProduct(id);
     },
     [openProduct]
@@ -2275,6 +2667,7 @@ React.useEffect(() => {
           onToggleEditMode={toggleEditMode}
           onOpenAllOrders={openAllOrdersDrawer}
           onOpenAllProducts={openAllProductsView}
+          onOpenInventory={openInventoryDrawer}
           onLogout={logout}
           navTone={navbarTone}
           zoneStyle={navbarDisplayStyle}
@@ -2445,6 +2838,7 @@ React.useEffect(() => {
                 canEditProducts={isAdmin && (editMode || adminAllProductsMode)}
                 onAdd={addToCart}
                 onRemove={removeFromCart}
+                onSetQty={setQtyInCart}
                 onOpenProduct={openProduct}
                 onEditProduct={openEditProduct}
                 onQuickStatusChange={updateProductStatus}
@@ -2664,10 +3058,11 @@ React.useEffect(() => {
         items={cartItemsForDisplay}
         subtotal={subtotal}
         backgroundStyle={mainZoneStyle}
-        onClose={() => setCartOpen(false)}
+        onClose={closeCart}
         onOpenProduct={handleCartOpenProduct as (id: string) => void}
         onAdd={addToCart}
         onRemove={removeFromCart}
+        onSetQty={setQtyInCart}
         onCheckout={openCheckout}
         formatMoney={formatMoney}
       />
@@ -2720,6 +3115,20 @@ React.useEffect(() => {
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
           setAllOrdersOpen(false);
+        }}
+      />
+
+      <InventoryDrawer
+        isOpen={inventoryOpen}
+        topOffset={topOffset}
+        rows={inventoryRows}
+        loading={loadingInventory}
+        onChangeUnlimited={handleInventoryUnlimitedChange}
+        onChangeQtyOnHand={handleInventoryQtyOnHandChange}
+        onBulkChangeUnlimited={handleInventoryBulkUnlimitedChange}
+        onBulkChangeQtyOnHand={handleInventoryBulkQtyOnHandChange}
+        onClose={() => {
+          openShop();
         }}
       />
 

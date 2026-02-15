@@ -4,7 +4,7 @@
 import * as React from "react";
 import type { Product } from "@/types/product";
 import type { ProductImage } from "@/lib/products";
-import { AppButton, GearIcon, QtyIcon } from "@/components/ui";
+import { AppButton, GearIcon, QtyIcon, TOPBAR_FONT_SIZE } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 const BACK_BTN_W = 68;
 const TITLE_GAP = 40;
@@ -451,7 +451,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 2,
   },
   topTitle: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 0.5,
     color: "var(--tp-text-color)",
@@ -480,7 +480,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginRight: TITLE_GAP,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     border: "none",

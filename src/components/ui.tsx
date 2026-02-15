@@ -3,6 +3,10 @@
 
 import * as React from "react";
 
+export const TOPBAR_FONT_SIZE_DESKTOP = 16;
+export const TOPBAR_FONT_SIZE_MOBILE = 15;
+export const TOPBAR_FONT_SIZE = TOPBAR_FONT_SIZE_DESKTOP;
+
 export const UI = {
   // Primary dark button style (matches cart Checkout button)
   btn: {
@@ -142,6 +146,21 @@ export function QtyIcon({ type }: QtyIconProps) {
         stroke="currentColor"
         strokeWidth="3"
         strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+type TrashIconProps = {
+  size?: number;
+};
+
+export function TrashIcon({ size = 16 }: TrashIconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+      <path
+        d="M9 4h6l1 2h4v2H4V6h4l1-2Zm1 6h2v8h-2v-8Zm4 0h2v8h-2v-8ZM7 10h2v8H7v-8Z"
+        fill="currentColor"
       />
     </svg>
   );

@@ -1,7 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import {
+  AppButton,
+  TOPBAR_FONT_SIZE,
+  TOPBAR_FONT_SIZE_MOBILE,
+} from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 
 type Props = {
@@ -136,11 +140,17 @@ export default function MyDetailsDrawer({
 
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
-  const rowStyle = isWideDesktop ? styles.fieldRowDesktop : styles.fieldRowMobile;
-  const labelStyle = isWideDesktop ? styles.labelDesktop : styles.label;
+  const rowStyle = isWideDesktop
+    ? styles.fieldRowDesktop
+    : isMobileViewport
+      ? styles.fieldRowMobileAligned
+      : styles.fieldRowMobile;
+  const labelStyle = isWideDesktop || isMobileViewport ? styles.labelDesktop : styles.label;
   const textAreaRowStyle = isWideDesktop
     ? { ...styles.fieldRowDesktop, alignItems: "start" }
-    : styles.fieldRowMobile;
+    : isMobileViewport
+      ? { ...styles.fieldRowMobileAligned, alignItems: "start" }
+      : styles.fieldRowMobile;
 
   const setField = (k: keyof Draft, v: string) => {
     setSaved(false);
@@ -189,6 +199,12 @@ export default function MyDetailsDrawer({
     setLoading(false);
   };
 
+  const handleEnterCommit = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.currentTarget.blur();
+  };
+
   return (
     <>
       <div
@@ -200,78 +216,153 @@ export default function MyDetailsDrawer({
         }}
       />
       <aside
-        className="tp-drawer-slide-up"
+        className={isMobileViewport ? "tp-sheet-slide-up" : "tp-drawer-slide-up"}
         style={{
           ...styles.panel,
           ...(backgroundStyle ?? null),
           top: panelTop,
           height: panelHeight,
+          ...(isMobileViewport
+            ? {
+                width: "100vw",
+                left: 0,
+                transform: "none",
+              }
+            : null),
         }}
       >
-        <div style={styles.topRow}>
-          <AppButton variant="ghost" style={styles.backBtn} onClick={onClose}>
+        <div style={{ ...styles.topRow, ...(isMobileViewport ? styles.topRowMobile : null) }}>
+          <AppButton
+            variant="ghost"
+            style={{ ...styles.backBtn, ...(isMobileViewport ? styles.backBtnMobile : null) }}
+            onClick={onClose}
+          >
             BACK
           </AppButton>
-          <div style={styles.title}>PROFILE</div>
+          <div style={{ ...styles.title, ...(isMobileViewport ? styles.titleMobile : null) }}>
+            PROFILE
+          </div>
         </div>
 
         <div
           style={{
             ...styles.content,
-            ...(isMobileViewport ? { padding: "8px 10px 20px" } : null),
+            ...(isMobileViewport ? styles.contentMobile : null),
           }}
         >
           <div style={styles.card}>
-            <div style={styles.row2}>
+            <div style={{ ...styles.row2, ...(isMobileViewport ? styles.row2Mobile : null) }}>
               <div style={rowStyle}>
                 <label style={labelStyle}>First name</label>
-                <input style={styles.input} value={draft.first_name} onChange={(e) => setField("first_name", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.first_name}
+                  onChange={(e) => setField("first_name", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
               <div style={rowStyle}>
                 <label style={labelStyle}>Last name</label>
-                <input style={styles.input} value={draft.last_name} onChange={(e) => setField("last_name", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.last_name}
+                  onChange={(e) => setField("last_name", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
             </div>
 
+            <div style={styles.addressSectionLabel}>Delivery address:</div>
+
             <div style={rowStyle}>
               <label style={labelStyle}>Attention to</label>
-              <input style={styles.input} value={draft.attention_to} onChange={(e) => setField("attention_to", e.target.value)} onBlur={saveIfChanged} />
+              <input
+                style={styles.input}
+                value={draft.attention_to}
+                onChange={(e) => setField("attention_to", e.target.value)}
+                onBlur={saveIfChanged}
+                onKeyDown={handleEnterCommit}
+              />
             </div>
 
             <div style={rowStyle}>
               <label style={labelStyle}>Phone number</label>
-              <input style={styles.input} value={draft.phone} onChange={(e) => setField("phone", e.target.value)} onBlur={saveIfChanged} />
+              <input
+                style={styles.input}
+                value={draft.phone}
+                onChange={(e) => setField("phone", e.target.value)}
+                onBlur={saveIfChanged}
+                onKeyDown={handleEnterCommit}
+              />
             </div>
 
             <div style={rowStyle}>
               <label style={labelStyle}>Line 1</label>
-              <input style={styles.input} value={draft.line1} onChange={(e) => setField("line1", e.target.value)} onBlur={saveIfChanged} />
+              <input
+                style={styles.input}
+                value={draft.line1}
+                onChange={(e) => setField("line1", e.target.value)}
+                onBlur={saveIfChanged}
+                onKeyDown={handleEnterCommit}
+              />
             </div>
 
             <div style={rowStyle}>
               <label style={labelStyle}>Line 2</label>
-              <input style={styles.input} value={draft.line2} onChange={(e) => setField("line2", e.target.value)} onBlur={saveIfChanged} />
+              <input
+                style={styles.input}
+                value={draft.line2}
+                onChange={(e) => setField("line2", e.target.value)}
+                onBlur={saveIfChanged}
+                onKeyDown={handleEnterCommit}
+              />
             </div>
 
-            <div style={styles.row2}>
+            <div style={{ ...styles.row2, ...(isMobileViewport ? styles.row2Mobile : null) }}>
               <div style={rowStyle}>
                 <label style={labelStyle}>Barangay</label>
-                <input style={styles.input} value={draft.barangay} onChange={(e) => setField("barangay", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.barangay}
+                  onChange={(e) => setField("barangay", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
               <div style={rowStyle}>
                 <label style={labelStyle}>City</label>
-                <input style={styles.input} value={draft.city} onChange={(e) => setField("city", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.city}
+                  onChange={(e) => setField("city", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
             </div>
 
-            <div style={styles.row2}>
+            <div style={{ ...styles.row2, ...(isMobileViewport ? styles.row2Mobile : null) }}>
               <div style={rowStyle}>
                 <label style={labelStyle}>Province</label>
-                <input style={styles.input} value={draft.province} onChange={(e) => setField("province", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.province}
+                  onChange={(e) => setField("province", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
               <div style={rowStyle}>
                 <label style={labelStyle}>Postal code</label>
-                <input style={styles.input} value={draft.postal_code} onChange={(e) => setField("postal_code", e.target.value)} onBlur={saveIfChanged} />
+                <input
+                  style={styles.input}
+                  value={draft.postal_code}
+                  onChange={(e) => setField("postal_code", e.target.value)}
+                  onBlur={saveIfChanged}
+                  onKeyDown={handleEnterCommit}
+                />
               </div>
             </div>
 
@@ -288,7 +379,11 @@ export default function MyDetailsDrawer({
 
             <div style={rowStyle}>
               <label style={labelStyle}>Country</label>
-              <input style={{ ...styles.input, opacity: 0.8 }} value={draft.country} disabled />
+              <input
+                style={{ ...styles.input, opacity: 0.8 }}
+                value={draft.country}
+                disabled
+              />
             </div>
 
             <div style={styles.footer}>
@@ -338,13 +433,18 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 40,
     padding: "18px 0 15px",
   },
+  topRowMobile: {
+    minHeight: 52,
+    gap: 10,
+    padding: "8px 10px 8px",
+  },
   backBtn: {
     width: 68,
     minWidth: 68,
     height: 36,
     padding: 0,
     borderRadius: 8,
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 700,
     letterSpacing: 1,
     border: "none",
@@ -352,16 +452,29 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "flex-start",
     textAlign: "left",
   },
+  backBtnMobile: {
+    fontSize: TOPBAR_FONT_SIZE_MOBILE,
+    height: 40,
+    padding: "0 15px 0 0",
+  },
   title: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 2,
     color: "var(--tp-text-color)",
+  },
+  titleMobile: {
+    fontSize: TOPBAR_FONT_SIZE_MOBILE,
+    fontWeight: 700,
+    letterSpacing: 0.2,
   },
   content: {
     flex: 1,
     overflowY: "auto",
     padding: "8px 0 44px 108px",
+  },
+  contentMobile: {
+    padding: "8px 12px 20px",
   },
   card: {
     maxWidth: "min(1120px, 100%)",
@@ -371,11 +484,22 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 0,
     color: "var(--tp-text-color)",
   },
+  addressSectionLabel: {
+    marginTop: 20,
+    marginBottom: 8,
+    fontSize: 15,
+    fontWeight: 700,
+    opacity: 0.9,
+  },
   row2: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     columnGap: 20,
     rowGap: 10,
+  },
+  row2Mobile: {
+    gridTemplateColumns: "1fr",
+    rowGap: 8,
   },
   fieldRowMobile: {
     display: "grid",
@@ -386,6 +510,13 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "140px 1fr",
     alignItems: "center",
     columnGap: 16,
+    marginTop: 4,
+  },
+  fieldRowMobileAligned: {
+    display: "grid",
+    gridTemplateColumns: "110px 1fr",
+    alignItems: "center",
+    columnGap: 12,
     marginTop: 4,
   },
   label: {

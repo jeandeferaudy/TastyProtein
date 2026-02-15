@@ -8,6 +8,9 @@ export type CartItem = {
   size: string | null;
   temperature?: string | null;
   thumbnailUrl?: string | null;
+  unlimitedStock?: boolean;
+  qtyAvailable?: number;
+  outOfStock?: boolean;
   price: number;
   qty: number;
   lineTotal: number;

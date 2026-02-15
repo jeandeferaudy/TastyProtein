@@ -15,6 +15,7 @@ type Props = {
 
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  onSetQty: (id: string, qty: number) => void;
   onOpen: (id: string) => void;
   onEdit?: (id: string) => void;
   onStatusChange?: (id: string, nextStatus: "Active" | "Disabled" | "Archived") => void;
@@ -52,6 +53,7 @@ export default function ProductCard({
   canEdit = false,
   onAdd,
   onRemove,
+  onSetQty,
   onOpen,
   onEdit,
   onStatusChange,
@@ -102,6 +104,21 @@ export default function ProductCard({
     ? { ...styles.top, ...styles.topCompact }
     : styles.top;
   const status = (product.status ?? "Active").toLowerCase();
+  const qtyAvailable = Math.max(0, Number(product.qty_available ?? 0));
+  const isStockLimited = !Boolean(product.unlimited_stock);
+  const isHardOos = isStockLimited && qtyAvailable < 1;
+  const showStockWarning = isStockLimited && !isHardOos && qty > qtyAvailable;
+  const [qtyEditing, setQtyEditing] = React.useState(false);
+  const [qtyDraft, setQtyDraft] = React.useState(String(Math.max(0, Number(qty) || 0)));
+  React.useEffect(() => {
+    if (qtyEditing) return;
+    setQtyDraft(String(Math.max(0, Number(qty) || 0)));
+  }, [qty, qtyEditing]);
+  const commitQty = React.useCallback(() => {
+    const parsed = Math.max(0, Math.floor(Number(qtyDraft || 0)));
+    onSetQty(id, parsed);
+    setQtyEditing(false);
+  }, [id, onSetQty, qtyDraft]);
   const normalizedStatus: "Active" | "Disabled" | "Archived" =
     status === "disabled" ? "Disabled" : status === "archived" ? "Archived" : "Active";
   const statusColor =
@@ -137,13 +154,15 @@ export default function ProductCard({
           }}
           aria-label={`Open ${longName}`}
         >
-          {imageUrl ? (
-            <img src={imageUrl} alt={longName} style={styles.listImage} loading="lazy" />
-          ) : (
-            <div style={styles.listImagePlaceholder} aria-hidden>
-              <LogoPlaceholder style={styles.logoPlaceholder} />
-            </div>
-          )}
+          <div style={styles.listImageShell}>
+            {imageUrl ? (
+              <img src={imageUrl} alt={longName} style={styles.listImage} loading="lazy" />
+            ) : (
+              <div style={styles.listImagePlaceholder} aria-hidden>
+                <LogoPlaceholder style={styles.logoPlaceholder} />
+              </div>
+            )}
+          </div>
         </button>
 
         <div style={useMobileList ? styles.listInfoMobile : styles.listInfo}>
@@ -170,44 +189,82 @@ export default function ProductCard({
             </div>
           </button>
           {useMobileList ? (
-            <div style={styles.listBottomRowMobile}>
-              <div style={styles.listPriceMobile}>
-                ₱ {formatMoney(price)}
-                <span style={styles.listPerInline}>{priceSuffix}</span>
-              </div>
-              <div style={styles.listPmRow}>
-                <AppButton
-                  variant="ghost"
-                  disabled={qty <= 0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemove(id);
-                  }}
-                  style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
-                >
-                  <QtyIcon type="minus" />
-                </AppButton>
-                <div
-                  style={{
-                    ...styles.listQty,
-                    opacity: qty <= 0 ? 0.72 : 0.95,
-                    fontWeight: qty <= 0 ? 500 : 900,
-                  }}
-                >
-                  {qty}
+            <>
+              <div style={styles.listBottomRowMobile}>
+                <div style={styles.listPriceMobile}>
+                  ₱ {formatMoney(price)}
+                  <span style={styles.listPerInline}>{priceSuffix}</span>
                 </div>
-                <AppButton
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAdd(id);
-                  }}
-                  style={styles.listPmBtn}
-                >
-                  <QtyIcon type="plus" />
-                </AppButton>
+                {isHardOos ? (
+                  <div style={styles.listOosZone}>Sold out</div>
+                ) : (
+                  <div style={styles.listPmRow}>
+                    <AppButton
+                      variant="ghost"
+                      disabled={qty <= 0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemove(id);
+                      }}
+                      style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
+                    >
+                      <QtyIcon type="minus" />
+                    </AppButton>
+                    {qtyEditing ? (
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={qtyDraft}
+                        onChange={(e) => setQtyDraft(e.target.value)}
+                        onBlur={(e) => {
+                          e.stopPropagation();
+                          commitQty();
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            commitQty();
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={styles.qtyInput}
+                        autoFocus
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQtyDraft(String(Math.max(0, Number(qty) || 0)));
+                          setQtyEditing(true);
+                        }}
+                        style={{
+                          ...styles.qtyBtn,
+                          opacity: qty <= 0 ? 0.72 : 0.95,
+                          fontWeight: qty <= 0 ? 500 : 900,
+                        }}
+                      >
+                        {qty}
+                      </button>
+                    )}
+                  <AppButton
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAdd(id);
+                      }}
+                      style={styles.listPmBtn}
+                    >
+                      <QtyIcon type="plus" />
+                    </AppButton>
+                  </div>
+                )}
+                {showStockWarning ? (
+                  <div style={styles.listStockWarning}>Only {qtyAvailable} left</div>
+                ) : null}
               </div>
-            </div>
+            </>
           ) : null}
         </div>
 
@@ -259,38 +316,74 @@ export default function ProductCard({
               ₱ {formatMoney(price)}
               <span style={styles.listPerInline}>{priceSuffix}</span>
             </div>
-            <div style={styles.listPmRow}>
-              <AppButton
-                variant="ghost"
-                disabled={qty <= 0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(id);
-                }}
-                style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
-              >
-                <QtyIcon type="minus" />
-              </AppButton>
-              <div
-                style={{
-                  ...styles.listQty,
-                  opacity: qty <= 0 ? 0.72 : 0.95,
-                  fontWeight: qty <= 0 ? 500 : 900,
-                }}
-              >
-                {qty}
+            {isHardOos ? (
+              <div style={styles.listOosZone}>Sold out</div>
+            ) : (
+              <div style={styles.listPmRow}>
+                <AppButton
+                  variant="ghost"
+                  disabled={qty <= 0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(id);
+                  }}
+                  style={{ ...styles.listPmBtn, opacity: qty <= 0 ? 0.45 : 1 }}
+                >
+                  <QtyIcon type="minus" />
+                </AppButton>
+                {qtyEditing ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={qtyDraft}
+                    onChange={(e) => setQtyDraft(e.target.value)}
+                    onBlur={(e) => {
+                      e.stopPropagation();
+                      commitQty();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        commitQty();
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    style={styles.qtyInput}
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setQtyDraft(String(Math.max(0, Number(qty) || 0)));
+                      setQtyEditing(true);
+                    }}
+                    style={{
+                      ...styles.qtyBtn,
+                      opacity: qty <= 0 ? 0.72 : 0.95,
+                      fontWeight: qty <= 0 ? 500 : 900,
+                    }}
+                  >
+                    {qty}
+                  </button>
+                )}
+                <AppButton
+                  variant="ghost"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAdd(id);
+                  }}
+                  style={styles.listPmBtn}
+                >
+                  <QtyIcon type="plus" />
+                </AppButton>
               </div>
-              <AppButton
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAdd(id);
-                }}
-                style={styles.listPmBtn}
-              >
-                <QtyIcon type="plus" />
-              </AppButton>
-            </div>
+            )}
+            {showStockWarning ? (
+              <div style={styles.listStockWarning}>Only {qtyAvailable} left</div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -379,57 +472,95 @@ export default function ProductCard({
         </div>
       )}
 
-      <div style={tilePmRowStyle}>
-        <AppButton
-          variant="ghost"
-          disabled={qty <= 0}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove(id);
-          }}
-          style={{
-            ...tilePmBtnStyle,
-            opacity: qty <= 0 ? 0.45 : 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 900,
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          <QtyIcon type="minus" />
-        </AppButton>
+      {isHardOos ? (
+        <div style={styles.oosZone}>Sold out</div>
+      ) : (
+        <div style={tilePmRowStyle}>
+          <AppButton
+            variant="ghost"
+            disabled={qty <= 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(id);
+            }}
+            style={{
+              ...tilePmBtnStyle,
+              opacity: qty <= 0 ? 0.45 : 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 900,
+              fontSize: 20,
+              lineHeight: 1,
+            }}
+          >
+            <QtyIcon type="minus" />
+          </AppButton>
 
-        <div
-          style={{
-            ...styles.qty,
-            opacity: qty <= 0 ? 0.72 : styles.qty.opacity,
-            fontWeight: qty <= 0 ? 500 : styles.qty.fontWeight,
-          }}
-        >
-          {qty}
+          <div style={styles.qtyCellWrap}>
+            {showStockWarning ? (
+              <div style={styles.qtyInlineWarning}>Only {qtyAvailable} left</div>
+            ) : null}
+            {qtyEditing ? (
+              <input
+                type="text"
+                inputMode="numeric"
+                value={qtyDraft}
+                onChange={(e) => setQtyDraft(e.target.value)}
+                onBlur={(e) => {
+                  e.stopPropagation();
+                  commitQty();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    commitQty();
+                  }
+                }}
+                onClick={(e) => e.stopPropagation()}
+                style={styles.qtyInput}
+                autoFocus
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setQtyDraft(String(Math.max(0, Number(qty) || 0)));
+                  setQtyEditing(true);
+                }}
+                style={{
+                  ...styles.qtyBtn,
+                  opacity: qty <= 0 ? 0.72 : styles.qty.opacity,
+                  fontWeight: qty <= 0 ? 500 : styles.qty.fontWeight,
+                }}
+              >
+                {qty}
+              </button>
+            )}
+          </div>
+
+          <AppButton
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd(id);
+            }}
+            style={{
+              ...tilePmBtnStyle,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 900,
+              fontSize: 20,
+              lineHeight: 1,
+            }}
+          >
+            <QtyIcon type="plus" />
+          </AppButton>
         </div>
-
-        <AppButton
-          variant="ghost"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd(id);
-          }}
-          style={{
-            ...tilePmBtnStyle,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 900,
-            fontSize: 20,
-            lineHeight: 1,
-          }}
-        >
-          <QtyIcon type="plus" />
-        </AppButton>
-      </div>
+      )}
     </div>
   );
 }
@@ -600,6 +731,66 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     opacity: 0.9,
   },
+  qtyBtn: {
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    textAlign: "center",
+    fontSize: 16,
+    cursor: "text",
+    padding: 0,
+    minWidth: 24,
+  },
+  qtyInput: {
+    width: 40,
+    height: 30,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    textAlign: "center",
+    fontSize: 15,
+    padding: "0 6px",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  qtyCellWrap: {
+    position: "relative",
+    width: "100%",
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qtyInlineWarning: {
+    position: "absolute",
+    top: -24,
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: 120,
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#ffb14a",
+    lineHeight: 1,
+    pointerEvents: "none",
+  },
+  oosZone: {
+    margin: 10,
+    marginTop: 8,
+    height: 40,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(160,160,160,0.25)",
+    color: "rgba(255,255,255,0.82)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 13,
+    fontWeight: 800,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
   listCard: {
     borderRadius: 14,
     border: "1px solid rgba(255,255,255,0.4)",
@@ -630,6 +821,13 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 0,
     cursor: "pointer",
   },
+  listImageShell: {
+    width: 75,
+    height: 75,
+    borderRadius: 10,
+    overflow: "hidden",
+    position: "relative",
+  },
   listImage: {
     width: 75,
     height: 75,
@@ -646,6 +844,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   logoPlaceholder: {
     opacity: 0.7,
+  },
+  imgOosShade: {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(0,0,0,0.55)",
+    pointerEvents: "none",
   },
   listInfo: {
     minWidth: 0,
@@ -810,5 +1014,31 @@ const styles: Record<string, React.CSSProperties> = {
   listQty: {
     textAlign: "center",
     fontSize: 16,
+  },
+  listStockWarning: {
+    marginTop: 4,
+    width: 114,
+    textAlign: "center",
+    justifySelf: "end",
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#ffb14a",
+    lineHeight: 1.1,
+  },
+  listOosZone: {
+    minWidth: 112,
+    height: 30,
+    borderRadius: 9,
+    border: "1px solid rgba(255,255,255,0.2)",
+    background: "rgba(160,160,160,0.25)",
+    color: "rgba(255,255,255,0.82)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    padding: "0 10px",
   },
 };

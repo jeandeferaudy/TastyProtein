@@ -16,6 +16,7 @@ type Props = {
 
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  onSetQty: (id: string, qty: number) => void;
   onOpenProduct: (id: string) => void;
   onEditProduct?: (id: string) => void;
   onQuickStatusChange?: (id: string, nextStatus: "Active" | "Disabled" | "Archived") => void;
@@ -32,6 +33,7 @@ export default function ProductGrid({
   canEditProducts = false,
   onAdd,
   onRemove,
+  onSetQty,
   onOpenProduct,
   onEditProduct,
   onQuickStatusChange,
@@ -104,6 +106,7 @@ export default function ProductGrid({
               onOpen={onOpenProduct}
               onAdd={onAdd}
               onRemove={onRemove}
+              onSetQty={onSetQty}
               onEdit={onEditProduct}
               onStatusChange={onQuickStatusChange}
               formatMoney={formatMoney}

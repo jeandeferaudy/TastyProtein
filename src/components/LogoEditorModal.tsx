@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
 
 type Props = {
   isOpen: boolean;
@@ -184,7 +184,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 12,
   },
   title: {
-    fontSize: 16,
+    fontSize: TOPBAR_FONT_SIZE,
     fontWeight: 900,
     letterSpacing: 1.4,
   },

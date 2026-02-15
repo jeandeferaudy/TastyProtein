@@ -1,7 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { AppButton } from "@/components/ui";
+import {
+  AppButton,
+  TOPBAR_FONT_SIZE,
+  TOPBAR_FONT_SIZE_MOBILE,
+} from "@/components/ui";
 import type { OrderListItem } from "@/lib/ordersApi";
 
 export type MyOrderItem = OrderListItem;
@@ -59,8 +63,15 @@ export default function MyOrdersDrawer({
   backgroundStyle,
 }: Props) {
   const [search, setSearch] = React.useState("");
+  const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
+  React.useEffect(() => {
+    const onResize = () => setIsMobileViewport(window.innerWidth < 768);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const sorted = React.useMemo(
     () => [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
     [orders]
@@ -86,15 +97,43 @@ export default function MyOrdersDrawer({
 
   return (
     <>
-      <div style={{ ...styles.backdrop, ...(backgroundStyle ?? null), top: panelTop, height: panelHeight }} />
-      <aside className="tp-drawer-slide-up" style={{ ...styles.panel, ...(backgroundStyle ?? null), top: panelTop, height: panelHeight }}>
-        <div style={styles.topRow}>
-          <AppButton variant="ghost" style={styles.backBtn} onClick={onClose}>
+      <div
+        style={{
+          ...styles.backdrop,
+          ...(backgroundStyle ?? null),
+          top: panelTop,
+          height: panelHeight,
+        }}
+      />
+      <aside
+        className={isMobileViewport ? "tp-sheet-slide-up" : "tp-drawer-slide-up"}
+        style={{
+          ...styles.panel,
+          ...(backgroundStyle ?? null),
+          top: panelTop,
+          height: panelHeight,
+          ...(isMobileViewport
+            ? {
+                width: "100vw",
+                left: 0,
+                transform: "none",
+              }
+            : null),
+        }}
+      >
+        <div style={{ ...styles.topRow, ...(isMobileViewport ? styles.topRowMobile : null) }}>
+          <AppButton
+            variant="ghost"
+            style={{ ...styles.backBtn, ...(isMobileViewport ? styles.backBtnMobile : null) }}
+            onClick={onClose}
+          >
             BACK
           </AppButton>
-          <div style={styles.title}>{title}</div>
+          <div style={{ ...styles.title, ...(isMobileViewport ? styles.titleMobile : null) }}>
+            {title}
+          </div>
         </div>
-        <div style={styles.content}>
+        <div style={{ ...styles.content, ...(isMobileViewport ? styles.contentMobile : null) }}>
           {showSearch ? (
             <div style={styles.searchWrap}>
               <input
@@ -105,41 +144,79 @@ export default function MyOrdersDrawer({
               />
             </div>
           ) : null}
-          <div style={styles.listHead}>
-            <div>ORDER #</div>
-            <div>ORDER DATE</div>
-            <div>DELIVERY DATE</div>
-            <div>CUSTOMER</div>
-            <div>ITEMS</div>
-            <div>TOTAL</div>
-            <div style={styles.centerCell}>STATUS</div>
-            <div style={styles.centerCell}>PAYMENT</div>
-            <div style={styles.centerCell}>DELIVERY</div>
-          </div>
+          {!isMobileViewport ? (
+            <div style={styles.listHead}>
+              <div>ORDER #</div>
+              <div>ORDER DATE</div>
+              <div>DELIVERY DATE</div>
+              <div>CUSTOMER</div>
+              <div>ITEMS</div>
+              <div>TOTAL</div>
+              <div style={styles.centerCell}>STATUS</div>
+              <div style={styles.centerCell}>PAYMENT</div>
+              <div style={styles.centerCell}>DELIVERY</div>
+            </div>
+          ) : null}
           {filtered.length === 0 ? (
             <div style={styles.empty}>No orders yet.</div>
           ) : (
-            filtered.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                style={{
-                  ...styles.listRow,
-                  ...(selectedOrderId === o.id ? styles.listRowActive : null),
-                }}
-                onClick={() => onSelectOrder?.(o.id)}
-              >
-                <div>{o.order_number ?? orderNumber8(o.id)}</div>
-                <div>{fmtDate(o.created_at)}</div>
-                <div>{o.delivery_date ? fmtDate(o.delivery_date) : "—"}</div>
-                <div style={styles.customerCell}>{o.full_name || "—"}</div>
-                <div>{o.total_qty}</div>
-                <div>₱ {fmtMoney(o.total_selling_price)}</div>
-                <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.status) }}>{o.status}</span></div>
-                <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.paid_status) }}>{o.paid_status}</span></div>
-                <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.delivery_status) }}>{o.delivery_status}</span></div>
-              </button>
-            ))
+            filtered.map((o) =>
+              isMobileViewport ? (
+                <button
+                  key={o.id}
+                  type="button"
+                  style={{
+                    ...styles.mobileCard,
+                    ...(selectedOrderId === o.id ? styles.listRowActive : null),
+                  }}
+                  onClick={() => onSelectOrder?.(o.id)}
+                >
+                  <div style={styles.mobileCardTop}>
+                    <div style={styles.mobileOrderNo}>#{o.order_number ?? orderNumber8(o.id)}</div>
+                    <div style={styles.mobileTotal}>₱ {fmtMoney(o.total_selling_price)}</div>
+                  </div>
+                  <div style={styles.mobileMetaRow}>
+                    <span>Order: {fmtDate(o.created_at)}</span>
+                    <span>Delivery: {o.delivery_date ? fmtDate(o.delivery_date) : "—"}</span>
+                  </div>
+                  <div style={styles.mobileMetaRow}>
+                    <span style={styles.customerCell}>{o.full_name || "—"}</span>
+                    <span>{o.total_qty} item(s)</span>
+                  </div>
+                  <div style={styles.mobilePillsRow}>
+                    <span style={{ ...styles.rowStatusPill, ...styles.rowStatusPillMobile, ...statusTone(o.status) }}>
+                      {o.status}
+                    </span>
+                    <span style={{ ...styles.rowStatusPill, ...styles.rowStatusPillMobile, ...statusTone(o.paid_status) }}>
+                      {o.paid_status}
+                    </span>
+                    <span style={{ ...styles.rowStatusPill, ...styles.rowStatusPillMobile, ...statusTone(o.delivery_status) }}>
+                      {o.delivery_status}
+                    </span>
+                  </div>
+                </button>
+              ) : (
+                <button
+                  key={o.id}
+                  type="button"
+                  style={{
+                    ...styles.listRow,
+                    ...(selectedOrderId === o.id ? styles.listRowActive : null),
+                  }}
+                  onClick={() => onSelectOrder?.(o.id)}
+                >
+                  <div>{o.order_number ?? orderNumber8(o.id)}</div>
+                  <div>{fmtDate(o.created_at)}</div>
+                  <div>{o.delivery_date ? fmtDate(o.delivery_date) : "—"}</div>
+                  <div style={styles.customerCell}>{o.full_name || "—"}</div>
+                  <div>{o.total_qty}</div>
+                  <div>₱ {fmtMoney(o.total_selling_price)}</div>
+                  <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.status) }}>{o.status}</span></div>
+                  <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.paid_status) }}>{o.paid_status}</span></div>
+                  <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.delivery_status) }}>{o.delivery_status}</span></div>
+                </button>
+              )
+            )
           )}
         </div>
       </aside>
@@ -162,9 +239,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: "none",
   },
   topRow: { minHeight: 64, display: "flex", alignItems: "center", gap: 40, padding: "18px 0 15px" },
-  backBtn: { width: 68, minWidth: 68, height: 36, padding: 0, borderRadius: 8, fontSize: 16, fontWeight: 700, letterSpacing: 1, border: "none", background: "transparent", justifyContent: "flex-start", textAlign: "left" },
-  title: { fontSize: 16, fontWeight: 900, letterSpacing: 2, color: "var(--tp-text-color)" },
+  topRowMobile: { minHeight: 52, gap: 10, padding: "8px 10px 8px" },
+  backBtn: { width: 68, minWidth: 68, height: 36, padding: 0, borderRadius: 8, fontSize: TOPBAR_FONT_SIZE, fontWeight: 700, letterSpacing: 1, border: "none", background: "transparent", justifyContent: "flex-start", textAlign: "left" },
+  backBtnMobile: { fontSize: TOPBAR_FONT_SIZE_MOBILE, height: 40, padding: "0 15px 0 0" },
+  title: { fontSize: TOPBAR_FONT_SIZE, fontWeight: 900, letterSpacing: 2, color: "var(--tp-text-color)" },
+  titleMobile: { fontSize: TOPBAR_FONT_SIZE_MOBILE, fontWeight: 700, letterSpacing: 0.2 },
   content: { flex: 1, overflowY: "auto", padding: "6px 24px 48px", color: "var(--tp-text-color)" },
+  contentMobile: { padding: "8px 12px 20px" },
   searchWrap: {
     marginBottom: 10,
   },
@@ -221,5 +302,46 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     letterSpacing: 0.4,
   },
+  rowStatusPillMobile: {
+    minWidth: 0,
+    height: 28,
+    fontSize: 12,
+    padding: "0 8px",
+  },
   centerCell: { textAlign: "center", display: "flex", justifyContent: "center", alignItems: "center" },
+  mobileCard: {
+    width: "100%",
+    border: "1px solid var(--tp-border-color-soft)",
+    borderRadius: 12,
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    textAlign: "left",
+    padding: "10px 10px 9px",
+    marginBottom: 10,
+    display: "grid",
+    gap: 6,
+  },
+  mobileCardTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  mobileOrderNo: { fontSize: 14, fontWeight: 800, letterSpacing: 0.3 },
+  mobileTotal: { fontSize: 15, fontWeight: 900 },
+  mobileMetaRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    fontSize: 13,
+    opacity: 0.88,
+  },
+  mobilePillsRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingTop: 2,
+  },
 };

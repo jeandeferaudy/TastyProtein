@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
       { source: "/myorders", destination: "/" },
       { source: "/profile", destination: "/" },
       { source: "/allproducts", destination: "/" },
+      { source: "/inventory", destination: "/" },
     ];
   },
 };

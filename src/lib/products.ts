@@ -19,6 +19,10 @@ export type DbProduct = {
   thumbnail_url?: string | null;
   keywords: string | null;
   status: string | null; // <-- use status instead of is_active
+  unlimited_stock?: boolean;
+  qty_on_hand?: number;
+  qty_allocated?: number;
+  qty_available?: number;
   sort: number | null;
 };
 
@@ -85,6 +89,25 @@ export async function fetchProducts(options?: {
       thumbnail_url: (r["thumbnail_url"] as string | null) ?? null,
       keywords: (r["keywords"] as string | null) ?? null,
       status: (r["status"] as string | null) ?? null,
+      unlimited_stock: Boolean(r["unlimited_stock"]),
+      qty_on_hand:
+        typeof r["qty_on_hand"] === "number"
+          ? (r["qty_on_hand"] as number)
+          : r["qty_on_hand"] == null
+            ? 0
+            : Number(r["qty_on_hand"]),
+      qty_allocated:
+        typeof r["qty_allocated"] === "number"
+          ? (r["qty_allocated"] as number)
+          : r["qty_allocated"] == null
+            ? 0
+            : Number(r["qty_allocated"]),
+      qty_available:
+        typeof r["qty_available"] === "number"
+          ? (r["qty_available"] as number)
+          : r["qty_available"] == null
+            ? 0
+            : Number(r["qty_available"]),
       sort:
         typeof r["sort"] === "number"
           ? (r["sort"] as number)
