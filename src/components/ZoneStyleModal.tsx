@@ -26,6 +26,11 @@ export type BannerDraft = {
   sort_order: number;
 };
 
+export type CheckoutPaymentDraft = {
+  gcash_qr_url: string;
+  gcash_phone: string;
+};
+
 type Props = {
   isOpen: boolean;
   zoneLabel: string;
@@ -42,6 +47,9 @@ type Props = {
   banners?: BannerDraft[];
   onSaveBanners?: (next: BannerDraft[]) => Promise<boolean> | boolean;
   onUploadBanner?: (file: File) => Promise<string>;
+  paymentDraft?: CheckoutPaymentDraft;
+  onSavePaymentDraft?: (next: CheckoutPaymentDraft) => Promise<boolean> | boolean;
+  onUploadPaymentQr?: (file: File) => Promise<string>;
 };
 
 export default function ZoneStyleModal({
@@ -60,6 +68,9 @@ export default function ZoneStyleModal({
   banners,
   onSaveBanners,
   onUploadBanner,
+  paymentDraft,
+  onSavePaymentDraft,
+  onUploadPaymentQr,
 }: Props) {
   const [draft, setDraft] = React.useState<ZoneStyleDraft>(initial);
   const [colorsDraft, setColorsDraft] = React.useState<ThemeColorsDraft | null>(
@@ -67,6 +78,9 @@ export default function ZoneStyleModal({
   );
   const [bannerDrafts, setBannerDrafts] = React.useState<BannerDraft[]>(
     banners ? banners.map((b) => ({ ...b })) : []
+  );
+  const [paymentUiDraft, setPaymentUiDraft] = React.useState<CheckoutPaymentDraft>(
+    paymentDraft ? { ...paymentDraft } : { gcash_qr_url: "", gcash_phone: "" }
   );
   const [localError, setLocalError] = React.useState<string>("");
 
@@ -98,9 +112,12 @@ export default function ZoneStyleModal({
       setDraft(initial);
       setColorsDraft(themeColors ? { ...themeColors } : null);
       setBannerDrafts(banners ? banners.map((b) => ({ ...b })) : []);
+      setPaymentUiDraft(
+        paymentDraft ? { ...paymentDraft } : { gcash_qr_url: "", gcash_phone: "" }
+      );
       setLocalError("");
     }
-  }, [banners, initial, isOpen, themeColors]);
+  }, [banners, initial, isOpen, paymentDraft, themeColors]);
 
   if (!isOpen) return null;
   const isLight = themeMode === "light";
@@ -560,6 +577,74 @@ export default function ZoneStyleModal({
             </>
           ) : null}
 
+          {onSavePaymentDraft ? (
+            <>
+              <div style={styles.sectionDivider} />
+              <div style={styles.sectionTitle}>Checkout payment</div>
+              <div style={styles.bannerHint}>
+                Set GCash QR and backup phone number for checkout payment.
+              </div>
+              <div style={styles.bannerCard}>
+                <div style={styles.bannerRow}>
+                  <label style={styles.bannerLabel}>GCash QR URL</label>
+                  <input
+                    type="text"
+                    value={paymentUiDraft.gcash_qr_url}
+                    onChange={(e) =>
+                      setPaymentUiDraft((prev) => ({ ...prev, gcash_qr_url: e.target.value }))
+                    }
+                    placeholder="https://..."
+                    style={styles.input}
+                  />
+                </div>
+                {onUploadPaymentQr ? (
+                  <div style={styles.uploadRow}>
+                    <label style={styles.uploadBtn}>
+                      Upload QR image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            setLocalError("");
+                            const url = await onUploadPaymentQr(file);
+                            setPaymentUiDraft((prev) => ({ ...prev, gcash_qr_url: url }));
+                          } catch (err) {
+                            setLocalError(
+                              err instanceof Error ? err.message : "Upload failed."
+                            );
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {paymentUiDraft.gcash_qr_url.trim() ? (
+                  <img
+                    src={paymentUiDraft.gcash_qr_url.trim()}
+                    alt="GCash QR preview"
+                    style={styles.paymentQrPreview}
+                  />
+                ) : null}
+                <div style={styles.bannerRow}>
+                  <label style={styles.bannerLabel}>GCash phone number</label>
+                  <input
+                    type="text"
+                    value={paymentUiDraft.gcash_phone}
+                    onChange={(e) =>
+                      setPaymentUiDraft((prev) => ({ ...prev, gcash_phone: e.target.value }))
+                    }
+                    placeholder="09xx xxx xxxx"
+                    style={styles.input}
+                  />
+                </div>
+              </div>
+            </>
+          ) : null}
+
           {localError ? <div style={styles.error}>{localError}</div> : null}
           {error ? <div style={styles.error}>{error}</div> : null}
         </div>
@@ -594,6 +679,17 @@ export default function ZoneStyleModal({
                 try {
                   const okBanners = await onSaveBanners(bannerDrafts);
                   if (!okBanners) okColors = false;
+                } catch {
+                  okColors = false;
+                }
+              }
+              if (onSavePaymentDraft) {
+                try {
+                  const okPayment = await onSavePaymentDraft({
+                    gcash_qr_url: paymentUiDraft.gcash_qr_url.trim(),
+                    gcash_phone: paymentUiDraft.gcash_phone.trim(),
+                  });
+                  if (!okPayment) okColors = false;
                 } catch {
                   okColors = false;
                 }
@@ -798,6 +894,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     letterSpacing: 0.9,
     marginTop: 10,
+  },
+  paymentQrPreview: {
+    width: 132,
+    height: 132,
+    borderRadius: 10,
+    objectFit: "cover",
+    border: "1px solid rgba(255,255,255,0.18)",
+    marginTop: 8,
   },
   colorGrid: {
     display: "grid",

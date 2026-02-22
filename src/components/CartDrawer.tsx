@@ -18,6 +18,7 @@ type Props = {
   onSetQty: (id: string, qty: number) => void;
   onOpenProduct: (id: string) => void;
   onCheckout: () => void;
+  checkoutLoading?: boolean;
 
   formatMoney: (n: unknown) => string;
 };
@@ -33,6 +34,7 @@ export default function CartDrawer({
   onSetQty,
   onOpenProduct,
   onCheckout,
+  checkoutLoading = false,
   formatMoney,
 }: Props) {
   const suppressRowOpenRef = React.useRef(false);
@@ -75,240 +77,261 @@ export default function CartDrawer({
   );
 
   return (
-    <aside
-      style={{
-        ...styles.panel,
-        ...(backgroundStyle ?? null),
-        transform: isOpen ? "translateX(0)" : "translateX(100%)",
-        pointerEvents: isOpen ? "auto" : "none",
-      }}
-      aria-hidden={!isOpen}
-    >
-      <div style={styles.header}>
-        <div style={styles.title}>CART</div>
-        <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button" aria-label="Close">
-          CLOSE
-        </AppButton>
-      </div>
+    <>
+      <div
+        style={{
+          ...styles.backdrop,
+          opacity: isOpen ? 1 : 0,
+          pointerEvents: isOpen ? "auto" : "none",
+        }}
+        onClick={onClose}
+        aria-hidden={!isOpen}
+      />
+      <aside
+        style={{
+          ...styles.panel,
+          ...(backgroundStyle ?? null),
+          transform: isOpen ? "translateX(0)" : "translateX(100%)",
+          pointerEvents: isOpen ? "auto" : "none",
+        }}
+        aria-hidden={!isOpen}
+      >
+        <div style={styles.header}>
+          <div style={styles.title}>CART</div>
+          <AppButton variant="ghost" style={styles.btn} onClick={onClose} type="button" aria-label="Close">
+            CLOSE
+          </AppButton>
+        </div>
 
-      <div style={styles.body}>
-        {items.length === 0 ? (
-          <div style={styles.empty}>Your cart is empty.</div>
-        ) : (
-          items.map((i) => {
-            const productId = String(i.productId);
-            const qty = Math.max(0, Number(i.qty) || 0);
-            const qtyAvailable = Math.max(0, Number(i.qtyAvailable ?? 0));
-            const isStockLimited = !Boolean(i.unlimitedStock);
-            const isHardOos = isStockLimited && qtyAvailable < 1;
-            const isOverLimit = isStockLimited && qty > qtyAvailable;
+        <div style={styles.body}>
+          {items.length === 0 ? (
+            <div style={styles.empty}>Your cart is empty.</div>
+          ) : (
+            items.map((i) => {
+              const productId = String(i.productId);
+              const qty = Math.max(0, Number(i.qty) || 0);
+              const qtyAvailable = Math.max(0, Number(i.qtyAvailable ?? 0));
+              const isStockLimited = !Boolean(i.unlimitedStock);
+              const isHardOos = isStockLimited && qtyAvailable < 1;
+              const isOverLimit = isStockLimited && qty > qtyAvailable;
 
-            return (
-            <div
-              key={productId}
-              style={styles.line}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                if (suppressRowOpenRef.current) return;
-                const target = e.target as HTMLElement | null;
-                if (target?.closest("[data-qty-control='1']")) return;
-                onOpenProduct(productId);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
+              return (
+              <div
+                key={productId}
+                style={styles.line}
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  if (suppressRowOpenRef.current) return;
+                  const target = e.target as HTMLElement | null;
+                  if (target?.closest("[data-qty-control='1']")) return;
                   onOpenProduct(productId);
-                }
-              }}
-            >
-              <div style={styles.thumbWrap}>
-                {i.thumbnailUrl ? (
-                  <img src={i.thumbnailUrl} alt="" style={styles.thumbImg} />
-                ) : (
-                  <LogoPlaceholder />
-                )}
-                {isHardOos ? <div style={styles.thumbOosOverlay}>OOS</div> : null}
-              </div>
-              <div style={styles.left}>
-                <div style={styles.name}>{i.name ?? "Unnamed product"}</div>
-                <div style={styles.meta}>
-                  {[i.country, i.temperature].filter(Boolean).join(" • ") || "—"}
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenProduct(productId);
+                  }
+                }}
+              >
+                <div style={styles.thumbWrap}>
+                  {i.thumbnailUrl ? (
+                    <img src={i.thumbnailUrl} alt="" style={styles.thumbImg} />
+                  ) : (
+                    <LogoPlaceholder />
+                  )}
+                  {isHardOos ? <div style={styles.thumbOosOverlay}>OOS</div> : null}
                 </div>
-                <div style={styles.perPiece}>
-                  ₱ {formatMoney(i.price)} for {i.size || "pc"}
-                </div>
-              </div>
-
-              <div style={styles.right}>
-                <div style={styles.lineTotal}>₱ {formatMoney(i.lineTotal)}</div>
-                {isHardOos ? (
-                  <div
-                    data-qty-control="1"
-                    style={styles.oosGroup}
-                    onClick={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                    onMouseDown={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                    onPointerDown={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                  >
-                    <AppButton
-                      variant="ghost"
-                      style={{ ...styles.pmBtn, ...styles.pmBtnTrash, opacity: qty > 0 ? 1 : 0.45 }}
-                      disabled={qty <= 0}
-                      onClick={(e) => {
-                        markQtyInteraction();
-                        e.stopPropagation();
-                        onSetQty(productId, 0);
-                      }}
-                      aria-label="Remove item"
-                    >
-                      <span style={styles.oosRemoveX} aria-hidden="true">
-                        <svg viewBox="0 0 24 24" width="100%" height="100%">
-                          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                        </svg>
-                      </span>
-                    </AppButton>
-                    <div style={{ ...styles.qty, ...styles.qtyOos }}>{qty}</div>
-                    <AppButton variant="ghost" style={{ ...styles.pmBtn, ...styles.pmBtnMuted }} disabled>
-                      <QtyIcon type="plus" />
-                    </AppButton>
+                <div style={styles.left}>
+                  <div style={styles.name}>{i.name ?? "Unnamed product"}</div>
+                  <div style={styles.meta}>
+                    {[i.country, i.temperature].filter(Boolean).join(" • ") || "—"}
                   </div>
-                ) : (
-                  <div
-                    data-qty-control="1"
-                    style={styles.pmRow}
-                    onClick={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                    onMouseDown={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                    onPointerDown={(e) => {
-                      markQtyInteraction();
-                      e.stopPropagation();
-                    }}
-                  >
-                    <AppButton
-                      variant="ghost"
-                      style={{ ...styles.pmBtn, opacity: qty > 0 ? 1 : 0.4 }}
-                      disabled={qty <= 0}
+                  <div style={styles.perPiece}>
+                    ₱ {formatMoney(i.price)} for {i.size || "pc"}
+                  </div>
+                </div>
+
+                <div style={styles.right}>
+                  <div style={styles.lineTotal}>₱ {formatMoney(i.lineTotal)}</div>
+                  {isHardOos ? (
+                    <div
+                      data-qty-control="1"
+                      style={styles.oosGroup}
                       onClick={(e) => {
                         markQtyInteraction();
                         e.stopPropagation();
-                        onRemove(productId);
+                      }}
+                      onMouseDown={(e) => {
+                        markQtyInteraction();
+                        e.stopPropagation();
+                      }}
+                      onPointerDown={(e) => {
+                        markQtyInteraction();
+                        e.stopPropagation();
                       }}
                     >
-                      <QtyIcon type="minus" />
-                    </AppButton>
-
-                    {editingQtyId === productId ? (
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={editingQtyDraft}
-                        onChange={(e) => setEditingQtyDraft(e.target.value)}
-                        onBlur={(e) => {
-                          e.stopPropagation();
-                          commitQty(productId);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            commitQty(productId);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        style={styles.qtyInput}
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        type="button"
+                      <AppButton
+                        variant="ghost"
+                        style={{ ...styles.pmBtn, ...styles.pmBtnTrash, opacity: qty > 0 ? 1 : 0.45 }}
+                        disabled={qty <= 0}
                         onClick={(e) => {
                           markQtyInteraction();
                           e.stopPropagation();
-                          setEditingQtyId(productId);
-                          setEditingQtyDraft(String(qty));
+                          onSetQty(productId, 0);
                         }}
-                        style={styles.qtyBtn}
+                        aria-label="Remove item"
                       >
-                        {qty}
-                      </button>
-                    )}
-
-                    <AppButton
-                      variant="ghost"
-                      style={styles.pmBtn}
+                        <span style={styles.oosRemoveX} aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="100%" height="100%">
+                            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        </span>
+                      </AppButton>
+                      <div style={{ ...styles.qty, ...styles.qtyOos }}>{qty}</div>
+                      <AppButton variant="ghost" style={{ ...styles.pmBtn, ...styles.pmBtnMuted }} disabled>
+                        <QtyIcon type="plus" />
+                      </AppButton>
+                    </div>
+                  ) : (
+                    <div
+                      data-qty-control="1"
+                      style={styles.pmRow}
                       onClick={(e) => {
                         markQtyInteraction();
                         e.stopPropagation();
-                        onAdd(productId);
+                      }}
+                      onMouseDown={(e) => {
+                        markQtyInteraction();
+                        e.stopPropagation();
+                      }}
+                      onPointerDown={(e) => {
+                        markQtyInteraction();
+                        e.stopPropagation();
                       }}
                     >
-                      <QtyIcon type="plus" />
-                    </AppButton>
-                  </div>
-                )}
-                {!isHardOos && isOverLimit ? (
-                  <div style={styles.stockWarning}>
-                    Only {qtyAvailable} left
-                  </div>
-                ) : null}
-                {isHardOos ? <div style={styles.stockWarning}>Sold out</div> : null}
-              </div>
-            </div>
-            );
-          })
-        )}
-      </div>
+                      <AppButton
+                        variant="ghost"
+                        style={{ ...styles.pmBtn, opacity: qty > 0 ? 1 : 0.4 }}
+                        disabled={qty <= 0}
+                        onClick={(e) => {
+                          markQtyInteraction();
+                          e.stopPropagation();
+                          onRemove(productId);
+                        }}
+                      >
+                        <QtyIcon type="minus" />
+                      </AppButton>
 
-      <div style={styles.footer}>
-        <div style={styles.metaRow}>
-          <div style={{ opacity: 0.8 }}>Items</div>
-          <div style={styles.metaValue}>{qtyCount}</div>
+                      {editingQtyId === productId ? (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={editingQtyDraft}
+                          onChange={(e) => setEditingQtyDraft(e.target.value)}
+                          onBlur={(e) => {
+                            e.stopPropagation();
+                            commitQty(productId);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              commitQty(productId);
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          style={styles.qtyInput}
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            markQtyInteraction();
+                            e.stopPropagation();
+                            setEditingQtyId(productId);
+                            setEditingQtyDraft(String(qty));
+                          }}
+                          style={styles.qtyBtn}
+                        >
+                          {qty}
+                        </button>
+                      )}
+
+                      <AppButton
+                        variant="ghost"
+                        style={styles.pmBtn}
+                        onClick={(e) => {
+                          markQtyInteraction();
+                          e.stopPropagation();
+                          onAdd(productId);
+                        }}
+                      >
+                        <QtyIcon type="plus" />
+                      </AppButton>
+                    </div>
+                  )}
+                  {!isHardOos && isOverLimit ? (
+                    <div style={styles.stockWarning}>
+                      Only {qtyAvailable} left
+                    </div>
+                  ) : null}
+                  {isHardOos ? <div style={styles.stockWarning}>Sold out</div> : null}
+                </div>
+              </div>
+              );
+            })
+          )}
         </div>
-        <div style={styles.totalRow}>
-          <div style={{ opacity: 0.8 }}>Subtotal</div>
-          <div style={styles.totalValue}>₱ {formatMoney(subtotal)}</div>
-        </div>
-        {hasOverLimitItems ? (
-          <div style={styles.warningBox}>
-            You need to reduce some quantites in your cart.
+
+        <div style={styles.footer}>
+          <div style={styles.metaRow}>
+            <div style={{ opacity: 0.8 }}>Items</div>
+            <div style={styles.metaValue}>{qtyCount}</div>
           </div>
-        ) : null}
-        <AppButton
-          style={{
-            ...styles.checkoutBtn,
-            opacity: items.length && !hasOverLimitItems ? 1 : 0.5
-          }}
-          disabled={!items.length || hasOverLimitItems}
-          onClick={(e) => {
-            if (suppressRowOpenRef.current) {
-              e.stopPropagation();
-              return;
-            }
-            onCheckout();
-          }}
-        >
-          Checkout
-        </AppButton>
-      </div>
-    </aside>
+          <div style={styles.totalRow}>
+            <div style={{ opacity: 0.8 }}>Subtotal</div>
+            <div style={styles.totalValue}>₱ {formatMoney(subtotal)}</div>
+          </div>
+          {hasOverLimitItems ? (
+            <div style={styles.warningBox}>
+              You need to reduce some quantites in your cart.
+            </div>
+          ) : null}
+          <AppButton
+            style={{
+              ...styles.checkoutBtn,
+              opacity: items.length && !hasOverLimitItems ? 1 : 0.5
+            }}
+            disabled={!items.length || hasOverLimitItems || checkoutLoading}
+            onClick={(e) => {
+              if (suppressRowOpenRef.current) {
+                e.stopPropagation();
+                return;
+              }
+              onCheckout();
+            }}
+          >
+            <span style={styles.checkoutLabel}>
+              Checkout
+              {checkoutLoading ? <span style={styles.checkoutSpinner} aria-hidden="true" /> : null}
+            </span>
+          </AppButton>
+        </div>
+      </aside>
+    </>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  backdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "transparent",
+    transition: "opacity 180ms ease",
+    zIndex: 1690,
+  },
   panel: {
     position: "fixed",
     top: 0,
@@ -524,5 +547,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
+  },
+  checkoutLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  checkoutSpinner: {
+    width: 14,
+    height: 14,
+    borderRadius: "50%",
+    border: "2px solid rgba(255,255,255,0.35)",
+    borderTopColor: "var(--tp-accent)",
+    animation: "tp-spin 0.8s linear infinite",
   },
 };

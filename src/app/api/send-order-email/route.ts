@@ -8,7 +8,7 @@ type SendOrderEmailPayload = {
   origin?: string | null;
 };
 
-const ADMIN_CC = ["uzziel.sanjuan@gmail.com", "adriel.sanjuan@gmail.com"];
+const DEFAULT_ADMIN_CC = ["uzziel.sanjuan@gmail.com", "adriel.sanjuan@gmail.com"];
 
 export async function POST(req: Request) {
   try {
@@ -34,14 +34,20 @@ export async function POST(req: Request) {
     const orderLabel = orderNumber ? `Order ${orderNumber}` : "Your order";
     const orderUrl = `${origin.replace(/\/$/, "")}/order?id=${encodeURIComponent(orderId)}`;
     const displayName = String(body.name ?? "").trim() || "there";
+    const adminCcEnv = String(process.env.ADMIN_CC_EMAILS ?? "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const adminCc = adminCcEnv.length ? adminCcEnv : DEFAULT_ADMIN_CC;
 
     const html = `
       <div style="font-family: Arial, sans-serif; color: #111;">
         <p>Hi ${displayName},</p>
-        <p>Thanks for your order. We received it and will take care of it shortly.</p>
+        <p>Your order has been placed successfully.</p>
         <p><strong>${orderLabel}</strong></p>
-        <p><a href="${orderUrl}">View your order</a></p>
-        <p>If you have any questions, just reply to this email.</p>
+        <p>You can view your order summary anytime using this link:</p>
+        <p><a href="${orderUrl}">${orderUrl}</a></p>
+        <p>If you have any questions, reply to this email and our team will help you.</p>
         <p>— Tasty Protein</p>
       </div>
     `;
@@ -55,8 +61,8 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         from,
         to: email,
-        cc: ADMIN_CC,
-        subject: `${orderLabel} received`,
+        cc: adminCc,
+        subject: `${orderLabel} has been placed`,
         html,
       }),
     });

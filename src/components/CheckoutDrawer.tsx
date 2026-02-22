@@ -11,6 +11,10 @@ import { supabase } from "@/lib/supabase";
 const TOPBAR_H = 88; // <-- adjust to match your white bar height (try 80-96)
 const BACK_BTN_W = 68;
 const TITLE_GAP = 40;
+const CONTENT_RIGHT_PAD = 24;
+const CHECKOUT_GRID_GAP = 26;
+const CHECKOUT_LEFT_COL_RATIO = 0.275; // 0.55 / (0.55 + 1.45)
+const PROGRESS_RIGHT_TRIM = 12;
 
 type DeliveryRule = {
   postal_code: string;
@@ -123,6 +127,8 @@ type Props = {
   // payment proof upload (optional)
   paymentFile?: File | null;
   setPaymentFile?: (f: File | null) => void;
+  gcashQrUrl?: string;
+  gcashPhone?: string;
 
   // actions
   onBack: () => void;
@@ -153,6 +159,8 @@ export default function CheckoutDrawer({
   profileAddress = null,
   paymentFile,
   setPaymentFile,
+  gcashQrUrl = "",
+  gcashPhone = "",
   onBack,
   onSubmit,
   onOpenProfile,
@@ -173,7 +181,13 @@ export default function CheckoutDrawer({
   const [deliveryRules, setDeliveryRules] = React.useState<DeliveryRule[]>([]);
   const [proofPreviewOpen, setProofPreviewOpen] = React.useState(false);
   const [proofPreviewUrl, setProofPreviewUrl] = React.useState<string | null>(null);
-  const deliveryDateInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [copyNoticeVisible, setCopyNoticeVisible] = React.useState(false);
+  const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+  const [timePickerOpen, setTimePickerOpen] = React.useState(false);
+  const datePickerWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const datePickerListRef = React.useRef<HTMLDivElement | null>(null);
+  const timePickerWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const timePickerListRef = React.useRef<HTMLDivElement | null>(null);
   const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const rightStepScrollRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -217,6 +231,12 @@ export default function CheckoutDrawer({
     };
   }, [proofPreviewUrl]);
 
+  React.useEffect(() => {
+    if (!copyNoticeVisible) return;
+    const timer = window.setTimeout(() => setCopyNoticeVisible(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [copyNoticeVisible]);
+
   const panelTop = Math.max(topOffset ?? TOPBAR_H, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
 
@@ -249,10 +269,6 @@ export default function CheckoutDrawer({
     );
   }, [profileAddress]);
   const minDeliveryMs = Date.now() + 2 * 60 * 60 * 1000;
-  const minDateObj = new Date(minDeliveryMs);
-  const minDeliveryDate = `${minDateObj.getFullYear()}-${String(
-    minDateObj.getMonth() + 1
-  ).padStart(2, "0")}-${String(minDateObj.getDate()).padStart(2, "0")}`;
 
   const slotOptions = useMemo(() => {
     const slots: string[] = [];
@@ -275,43 +291,23 @@ export default function CheckoutDrawer({
     [slotOptions]
   );
 
-  const defaultDeliveryTarget = useMemo(() => {
+  const minDeliveryDate = useMemo(() => {
     const fmtDate = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
         d.getDate()
       ).padStart(2, "0")}`;
-    const fmtSlot = (d: Date) =>
-      `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-
-    const now = new Date();
-    let target = new Date(now.getTime() + 3 * 60 * 60 * 1000);
-
-    // If +3h goes to 9pm or later, default to next day at 10:00.
-    if (target.getHours() >= 21) {
-      target = new Date(target);
-      target.setDate(target.getDate() + 1);
-      target.setHours(10, 0, 0, 0);
-      return { date: fmtDate(target), slot: fmtSlot(target) };
-    }
-
-    // Round up to nearest 30-minute slot.
-    const rounded = new Date(target);
-    const mins = rounded.getMinutes();
-    if (mins === 0 || mins === 30) {
-      // keep
-    } else if (mins < 30) {
-      rounded.setMinutes(30, 0, 0);
-    } else {
-      rounded.setHours(rounded.getHours() + 1, 0, 0, 0);
-    }
-
-    if (rounded.getHours() >= 21) {
-      rounded.setDate(rounded.getDate() + 1);
-      rounded.setHours(10, 0, 0, 0);
-    }
-
-    return { date: fmtDate(rounded), slot: fmtSlot(rounded) };
-  }, []);
+    const minDate = new Date(minDeliveryMs);
+    const minHH = minDate.getHours();
+    const minMM = minDate.getMinutes();
+    const hasSameDaySlots = daytimeSlots.some((slot) => {
+      const [h, m] = slot.split(":").map(Number);
+      return h > minHH || (h === minHH && m >= minMM);
+    });
+    if (hasSameDaySlots) return fmtDate(minDate);
+    const nextDay = new Date(minDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return fmtDate(nextDay);
+  }, [daytimeSlots, minDeliveryMs]);
 
   const validSlots = useMemo(() => {
     if (!customer.delivery_date) return daytimeSlots;
@@ -352,41 +348,23 @@ export default function CheckoutDrawer({
 
   React.useEffect(() => {
     if (!isOpen) return;
+    // Never prefill delivery date/time slot.
     if (!customer.delivery_date) {
-      const next = { ...customer, delivery_date: defaultDeliveryTarget.date };
-      const nextSlots = validSlots.length ? validSlots : daytimeSlots;
-      next.delivery_slot = nextSlots.includes(defaultDeliveryTarget.slot)
-        ? defaultDeliveryTarget.slot
-        : nextSlots[0] ?? "";
-      setCustomer(next);
-      return;
-    }
-    if (!validSlots.length) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const nextDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}-${String(tomorrow.getDate()).padStart(2, "0")}`;
-      setCustomer({
-        ...customer,
-        delivery_date: nextDate,
-        delivery_slot: "10:00",
-      });
+      if (customer.delivery_slot) {
+        setCustomer({
+          ...customer,
+          delivery_slot: "",
+        });
+      }
       return;
     }
     if (customer.delivery_slot && !validSlots.includes(customer.delivery_slot)) {
       setCustomer({
         ...customer,
-        delivery_slot: validSlots[0] ?? "",
-      });
-    } else if (!customer.delivery_slot && validSlots[0]) {
-      setCustomer({
-        ...customer,
-        delivery_slot: validSlots[0],
+        delivery_slot: "",
       });
     }
-  }, [customer, daytimeSlots, defaultDeliveryTarget.date, defaultDeliveryTarget.slot, isOpen, setCustomer, validSlots]);
+  }, [customer, isOpen, setCustomer, validSlots]);
 
   const selectedDeliveryMs = useMemo(() => {
     if (!customer.delivery_date || !customer.delivery_slot) return 0;
@@ -528,7 +506,54 @@ export default function CheckoutDrawer({
     rightStepScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [checkoutStep]);
 
-  if (!isOpen) return null;
+  const scrollTimeOptions = React.useCallback((direction: "up" | "down") => {
+    const list = timePickerListRef.current;
+    if (!list) return;
+    const delta = direction === "up" ? -140 : 140;
+    list.scrollBy({ top: delta, behavior: "smooth" });
+  }, []);
+
+  const scrollDateOptions = React.useCallback((direction: "up" | "down") => {
+    const list = datePickerListRef.current;
+    if (!list) return;
+    const delta = direction === "up" ? -140 : 140;
+    list.scrollBy({ top: delta, behavior: "smooth" });
+  }, []);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setTimePickerOpen(false);
+      setDatePickerOpen(false);
+      return;
+    }
+    if (!timePickerOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const root = timePickerWrapRef.current;
+      if (!root) return;
+      const target = event.target as Node | null;
+      if (target && root.contains(target)) return;
+      setTimePickerOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [isOpen, timePickerOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setDatePickerOpen(false);
+      return;
+    }
+    if (!datePickerOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const root = datePickerWrapRef.current;
+      if (!root) return;
+      const target = event.target as Node | null;
+      if (target && root.contains(target)) return;
+      setDatePickerOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [datePickerOpen, isOpen]);
 
   const isSummaryComplete = summaryLines.length > 0;
   const isCustomerComplete =
@@ -546,6 +571,9 @@ export default function CheckoutDrawer({
     customer.delivery_slot.trim().length > 0 &&
     (!isWithin2h || customer.express_delivery);
   const isLogisticsComplete = isDeliveryComplete;
+  const showDeliverySummary =
+    checkoutStep > 2 &&
+    Boolean(customer.delivery_date || customer.delivery_slot || customer.express_delivery);
   const isPaymentComplete = !requiresProof || !!paymentFile;
   const isReadyToSend = isCheckoutValid;
   const isOrderSent = checkoutState === "success";
@@ -602,126 +630,194 @@ export default function CheckoutDrawer({
   })();
 
   const openDatePicker = () => {
-    const el = deliveryDateInputRef.current as
-      | (HTMLInputElement & { showPicker?: () => void })
-      | null;
-    if (!el) return;
-    if (typeof el.showPicker === "function") {
-      el.showPicker();
-      return;
-    }
-    el.click();
+    setDatePickerOpen((prev) => !prev);
   };
+
+  const dateOptions = useMemo(() => {
+    const [y, m, d] = minDeliveryDate.split("-").map(Number);
+    const start = new Date(y, (m || 1) - 1, d || 1);
+    const out: Array<{ value: string; label: string }> = [];
+    for (let i = 0; i < 35; i += 1) {
+      const cur = new Date(start);
+      cur.setDate(start.getDate() + i);
+      const value = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(
+        cur.getDate()
+      ).padStart(2, "0")}`;
+      const label = cur.toLocaleDateString("en-PH", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      });
+      out.push({ value, label });
+    }
+    return out;
+  }, [minDeliveryDate]);
+
+  if (!isOpen) return null;
 
   const paymentSection = (
     <div style={styles.paymentBlock}>
       <div
         style={{
-          ...styles.paymentInstructionRow,
-          ...(isMobileViewport ? { fontSize: 15, lineHeight: 1.3, marginBottom: 10 } : null),
-        }}
-      >
-        Scan the QR code, complete your payment, take a screenshot, then upload it below.
-      </div>
-      <div
-        style={{
           ...styles.qrCardCompact,
           ...(isMobileViewport
             ? {
-                gridTemplateColumns: "auto 1fr",
+                gridTemplateColumns: "1fr",
                 gap: 12,
-                alignItems: "center",
+                alignItems: "start",
               }
             : null),
         }}
       >
-        <div style={styles.qrLeft}>
-          <svg
-            viewBox="0 0 200 200"
-            width={isMobileViewport ? 152 : 208}
-            height={isMobileViewport ? 152 : 208}
-            aria-label="QR placeholder"
-            style={{ borderRadius: 14 }}
-          >
-            <rect x="0" y="0" width="200" height="200" fill="#fff" />
-            <rect x="18" y="18" width="64" height="64" fill="#000" />
-            <rect x="30" y="30" width="40" height="40" fill="#fff" />
-            <rect x="118" y="18" width="64" height="64" fill="#000" />
-            <rect x="130" y="30" width="40" height="40" fill="#fff" />
-            <rect x="18" y="118" width="64" height="64" fill="#000" />
-            <rect x="30" y="130" width="40" height="40" fill="#fff" />
-            <rect x="95" y="95" width="12" height="12" fill="#000" />
-            <rect x="112" y="95" width="12" height="12" fill="#000" />
-            <rect x="95" y="112" width="12" height="12" fill="#000" />
-            <rect x="132" y="112" width="12" height="12" fill="#000" />
-            <rect x="150" y="95" width="12" height="12" fill="#000" />
-            <rect x="112" y="132" width="12" height="12" fill="#000" />
-          </svg>
+        <div
+          style={{
+            ...styles.qrLeft,
+            ...(isMobileViewport
+              ? {
+                  display: "flex",
+                  justifyContent: "center",
+                }
+              : {
+                  marginLeft: 10,
+                }),
+          }}
+        >
+          {gcashQrUrl.trim() ? (
+            <img
+              src={gcashQrUrl.trim()}
+              alt="GCash QR code"
+              style={{
+                ...styles.qrImage,
+                width: isMobileViewport ? 220 : 270,
+                height: isMobileViewport ? 220 : 270,
+              }}
+            />
+          ) : (
+            <svg
+              viewBox="0 0 200 200"
+              width={isMobileViewport ? 220 : 270}
+              height={isMobileViewport ? 220 : 270}
+              aria-label="QR placeholder"
+              style={{ borderRadius: 14 }}
+            >
+              <rect x="0" y="0" width="200" height="200" fill="#fff" />
+              <rect x="18" y="18" width="64" height="64" fill="#000" />
+              <rect x="30" y="30" width="40" height="40" fill="#fff" />
+              <rect x="118" y="18" width="64" height="64" fill="#000" />
+              <rect x="130" y="30" width="40" height="40" fill="#fff" />
+              <rect x="18" y="118" width="64" height="64" fill="#000" />
+              <rect x="30" y="130" width="40" height="40" fill="#fff" />
+              <rect x="95" y="95" width="12" height="12" fill="#000" />
+              <rect x="112" y="95" width="12" height="12" fill="#000" />
+              <rect x="95" y="112" width="12" height="12" fill="#000" />
+              <rect x="132" y="112" width="12" height="12" fill="#000" />
+              <rect x="150" y="95" width="12" height="12" fill="#000" />
+              <rect x="112" y="132" width="12" height="12" fill="#000" />
+            </svg>
+          )}
+          {gcashPhone.trim() ? (
+            <div style={styles.gcashLine}>
+              <span>GCASH to </span>
+              <button
+                type="button"
+                style={styles.gcashNumberBtn}
+                onClick={async () => {
+                  const number = gcashPhone.trim();
+                  if (!number) return;
+                  try {
+                    await navigator.clipboard.writeText(number);
+                    setCopyNoticeVisible(true);
+                  } catch {
+                    // Clipboard may fail without secure context; keep silent.
+                  }
+                }}
+                title="Copy GCash number"
+              >
+                {gcashPhone.trim()}
+              </button>
+              {copyNoticeVisible ? <span style={styles.copyNotice}>Copied</span> : null}
+            </div>
+          ) : null}
         </div>
 
         <div
           style={{
             ...styles.qrRightCompact,
-            ...(isMobileViewport ? { gap: 10, alignItems: "flex-start", justifyItems: "start" } : null),
+            ...(isMobileViewport
+              ? {
+                  gap: 10,
+                  alignItems: "flex-start",
+                  justifyItems: "start",
+                }
+              : null),
           }}
         >
-          <div style={styles.qrAmount}>₱ {formatMoney(grandTotal)}</div>
-        </div>
-      </div>
-      <div style={{ ...styles.uploadBlock, ...(isMobileViewport ? styles.uploadBlockMobile : null) }}>
-        <label
-          style={{
-            ...UI.btnGhost,
-            ...styles.uploadBtnCompact,
-            ...(isMobileViewport ? styles.uploadBtnFullMobile : null),
-          }}
-        >
-          Upload Screenshot
-          <input
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setPaymentFile?.(f);
+          <div
+            style={{
+              ...styles.paymentInstructionRow,
+              ...(isMobileViewport ? { fontSize: 15, lineHeight: 1.3, marginBottom: 2 } : null),
             }}
-          />
-        </label>
-
-        <div style={styles.uploadRow}>
-          {paymentFile ? (
-            <button
-              type="button"
-              style={styles.fileNameBtn}
-              onClick={() => {
-                if (!paymentFile.type.startsWith("image/")) return;
-                if (proofPreviewUrl) URL.revokeObjectURL(proofPreviewUrl);
-                const nextUrl = URL.createObjectURL(paymentFile);
-                setProofPreviewUrl(nextUrl);
-                setProofPreviewOpen(true);
+          >
+            Scan the QR code, complete your payment, take a screenshot, then upload it below.
+          </div>
+          <div style={styles.qrAmount}>₱ {formatMoney(grandTotal)}</div>
+          <div style={{ ...styles.uploadBlock, ...(isMobileViewport ? styles.uploadBlockMobile : null) }}>
+            <label
+              style={{
+                ...UI.btnGhost,
+                ...styles.uploadBtnCompact,
+                ...(isMobileViewport ? styles.uploadBtnFullMobile : null),
               }}
             >
-              {paymentFile.name}
-            </button>
-          ) : null}
-          {paymentFile ? (
-            <button
-              type="button"
-              style={styles.removeFileBtn}
-              onClick={() => setPaymentFile?.(null)}
-              aria-label="Remove uploaded file"
-              title="Remove file"
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path
-                  d="M6 6l12 12M18 6L6 18"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
+              Upload Screenshot
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setPaymentFile?.(f);
+                }}
+              />
+            </label>
+
+            <div style={styles.uploadRow}>
+              {paymentFile ? (
+                <button
+                  type="button"
+                  style={styles.fileNameBtn}
+                  onClick={() => {
+                    if (!paymentFile.type.startsWith("image/")) return;
+                    if (proofPreviewUrl) URL.revokeObjectURL(proofPreviewUrl);
+                    const nextUrl = URL.createObjectURL(paymentFile);
+                    setProofPreviewUrl(nextUrl);
+                    setProofPreviewOpen(true);
+                  }}
+                >
+                  {paymentFile.name}
+                </button>
+              ) : null}
+              {paymentFile ? (
+                <button
+                  type="button"
+                  style={styles.removeFileBtn}
+                  onClick={() => setPaymentFile?.(null)}
+                  aria-label="Remove uploaded file"
+                  title="Remove file"
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                    <path
+                      d="M6 6l12 12M18 6L6 18"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -776,28 +872,26 @@ export default function CheckoutDrawer({
                     onClick={() => goToStep(item.step)}
                   >
                     {item.label}
-                    {stepAttempted[item.step] ? (
-                      stepValid(item.step) || isOrderSent ? (
-                        <span style={styles.stepCheck}>✓</span>
-                      ) : (
-                        <span style={styles.stepWarn} aria-label="Needs attention">
-                          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                            <path
-                              d="M12 3 22 20H2L12 3Z"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinejoin="round"
-                            />
-                            <path
-                              d="M12 9v5m0 3v.01"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                        </span>
-                      )
+                    {stepValid(item.step) || isOrderSent ? (
+                      <span style={styles.stepCheck}>✓</span>
+                    ) : stepAttempted[item.step] ? (
+                      <span style={styles.stepWarn} aria-label="Needs attention">
+                        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                          <path
+                            d="M12 3 22 20H2L12 3Z"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M12 9v5m0 3v.01"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </span>
                     ) : null}
                   </button>
                 ))}
@@ -904,7 +998,12 @@ export default function CheckoutDrawer({
                       <div style={styles.summaryMinorLabel}>
                         {referBagFee > 0 ? "Thermal bag" : "Standard bag"}
                       </div>
-                      <div style={styles.summaryMinorValue}>
+                      <div
+                        style={{
+                          ...styles.summaryMinorValue,
+                          ...(referBagFee > 0 ? styles.summaryAccentText : null),
+                        }}
+                      >
                         {referBagFee > 0 ? "$200" : <span style={styles.freeTag}>FREE</span>}
                       </div>
                     </div>
@@ -953,14 +1052,22 @@ export default function CheckoutDrawer({
                           .filter(Boolean)
                           .join(", ") || "—"}
                       </div>
-                      <div style={{ ...styles.summaryMiniTitle, marginTop: 20 }}>DELIVERY</div>
-                      <div style={{ ...styles.summaryIndentedBlock, marginTop: 10 }}>
-                        {"Delivery scheduled on " +
-                          (deliveryDateLongDisplay || customer.delivery_date || "—") +
-                          (customer.delivery_slot ? ` at ${customer.delivery_slot}` : "") +
-                          "."}
-                      </div>
-                      {customer.express_delivery ? <div style={styles.summaryIndentedBlock}>Express delivery</div> : null}
+                      {showDeliverySummary ? (
+                        <>
+                          <div style={{ ...styles.summaryMiniTitle, marginTop: 20 }}>DELIVERY</div>
+                          <div style={{ ...styles.summaryIndentedBlock, marginTop: 10 }}>
+                            {"Delivery scheduled on " +
+                              (deliveryDateLongDisplay || customer.delivery_date || "—") +
+                              (customer.delivery_slot ? ` at ${customer.delivery_slot}` : "") +
+                              "."}
+                          </div>
+                          {customer.express_delivery ? (
+                            <div style={{ ...styles.summaryIndentedBlock, ...styles.summaryAccentText }}>
+                              Express delivery
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -1014,28 +1121,26 @@ export default function CheckoutDrawer({
                           onClick={() => goToStep(item.step)}
                         >
                           {item.label}
-                          {stepAttempted[item.step] ? (
-                            stepValid(item.step) || isOrderSent ? (
-                              <span style={styles.stepCheck}>✓</span>
-                            ) : (
-                              <span style={styles.stepWarn} aria-label="Needs attention">
-                                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                                  <path
-                                    d="M12 3 22 20H2L12 3Z"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinejoin="round"
-                                  />
-                                  <path
-                                    d="M12 9v5m0 3v.01"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                  />
-                                </svg>
-                              </span>
-                            )
+                          {stepValid(item.step) || isOrderSent ? (
+                            <span style={styles.stepCheck}>✓</span>
+                          ) : stepAttempted[item.step] ? (
+                            <span style={styles.stepWarn} aria-label="Needs attention">
+                              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                                <path
+                                  d="M12 3 22 20H2L12 3Z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinejoin="round"
+                                />
+                                <path
+                                  d="M12 9v5m0 3v.01"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </span>
                           ) : null}
                         </button>
                       ))}
@@ -1044,10 +1149,6 @@ export default function CheckoutDrawer({
                 ) : null}
                 {checkoutStep === 1 ? (
                   <>
-                    <div style={styles.sectionTitleRowSticky}>
-                      <div style={styles.sectionTitle}>CART</div>
-                      {null}
-                    </div>
                     <div style={styles.cartStepItems}>
                       {summaryLines.length === 0 ? (
                         <div style={{ opacity: 0.7 }}>No items.</div>
@@ -1128,10 +1229,6 @@ export default function CheckoutDrawer({
                   </>
                 ) : checkoutStep === 2 ? (
                   <>
-	                <div style={styles.sectionTitleRowSticky}>
-	                  <div style={styles.sectionTitle}>CUSTOMER DETAILS</div>
-		                  {null}
-	                </div>
 	                <div
 	                  style={isNarrow ? styles.detailsBodyScrollMobile : styles.detailsBodyScroll}
 	                >
@@ -1182,11 +1279,13 @@ export default function CheckoutDrawer({
 
                 {isLoggedIn ? (
                   <div style={{ ...fieldRowStyle, alignItems: "center" }}>
-                    <label style={fieldLabelStyle}>Delivery address</label>
+                    <label style={{ ...fieldLabelStyle, ...styles.deliveryAddressLabel }}>
+                      Delivery address
+                    </label>
 	                    <label style={styles.profileAddressRow}>
 	                      <input
 	                        type="checkbox"
-	                        style={styles.profileAddressCheckbox}
+	                        style={styles.checkoutCheckbox}
 	                        checked={useProfileAddress}
 	                        onChange={(e) => {
                           const checked = e.target.checked;
@@ -1218,8 +1317,8 @@ export default function CheckoutDrawer({
                           }
                         }}
                       />
-                      <span>
-                        use the address from{" "}
+                      <span style={styles.profileAddressText}>
+                        use the address from
                         <button
                           type="button"
                           onClick={onOpenProfile}
@@ -1294,7 +1393,9 @@ export default function CheckoutDrawer({
                 </div>
 
 	                <div style={{ ...fieldRowStyle, alignItems: "flex-start" }}>
-	                  <label style={fieldLabelStyle}>Notes (optional)</label>
+	                  <label style={{ ...fieldLabelStyle, ...styles.notesLabel }}>
+                      Notes (optional)
+                    </label>
 	                  <textarea
 	                    ref={notesTextareaRef}
 	                    rows={1}
@@ -1313,6 +1414,7 @@ export default function CheckoutDrawer({
                   <label style={styles.optInRow}>
                     <input
                       type="checkbox"
+                      style={styles.checkoutCheckbox}
                       checked={createAccountFromDetails}
                       onChange={(e) => setCreateAccountFromDetails(e.target.checked)}
                     />
@@ -1325,6 +1427,7 @@ export default function CheckoutDrawer({
                   <label style={styles.optInRow}>
                     <input
                       type="checkbox"
+                      style={styles.checkoutCheckbox}
                       checked={saveAddressToProfile}
                       onChange={(e) => setSaveAddressToProfile(e.target.checked)}
                     />
@@ -1349,10 +1452,6 @@ export default function CheckoutDrawer({
 		                  </>
 		                ) : checkoutStep === 3 ? (
 		                  <>
-		                <div style={styles.sectionTitleRowSticky}>
-		                  <div style={styles.sectionTitle}>DELIVERY</div>
-		                  {null}
-		                </div>
 		                <div
 		                  style={isNarrow ? styles.detailsBodyScrollMobile : styles.detailsBodyScroll}
 		                >
@@ -1361,11 +1460,11 @@ export default function CheckoutDrawer({
 		                    <label style={fieldLabelStyle}>
 		                      Delivery date<span style={styles.req}>*</span>
 		                    </label>
-		                    <div style={styles.datePickerWrap}>
+		                    <div ref={datePickerWrapRef} style={styles.datePickerWrap}>
 		                      <input
 		                        type="text"
 		                        readOnly
-		                        style={styles.input}
+		                        style={{ ...styles.input, ...styles.dateDisplayInput }}
 		                        value={deliveryDateDisplay}
 		                        placeholder="dd mmm yyyy"
 		                        onClick={openDatePicker}
@@ -1378,16 +1477,55 @@ export default function CheckoutDrawer({
 		                      >
 		                        📅
 		                      </button>
-		                      <input
-		                        ref={deliveryDateInputRef}
-		                        type="date"
-		                        min={minDeliveryDate}
-		                        style={styles.dateInputNative}
-		                        value={customer.delivery_date}
-		                        onChange={(e) =>
-		                          setCustomer({ ...customer, delivery_date: e.target.value })
-		                        }
-		                      />
+                              {datePickerOpen ? (
+                                <div
+                                  style={styles.datePickerPopup}
+                                  onWheel={(e) => e.stopPropagation()}
+                                  onTouchMove={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    style={{ ...styles.timeScrollBtn, ...styles.timeScrollBtnTop }}
+                                    onClick={() => scrollDateOptions("up")}
+                                    aria-label="Scroll date options up"
+                                  >
+                                    ▲
+                                  </button>
+                                  <div ref={datePickerListRef} style={styles.datePickerList}>
+                                    {dateOptions.map((opt) => {
+                                      const selected = opt.value === customer.delivery_date;
+                                      return (
+                                        <button
+                                          key={opt.value}
+                                          type="button"
+                                          style={{
+                                            ...styles.dateOptionItem,
+                                            ...(selected ? styles.dateOptionItemSelected : null),
+                                          }}
+                                          onClick={() => {
+                                            setCustomer({
+                                              ...customer,
+                                              delivery_date: opt.value,
+                                              delivery_slot: "",
+                                            });
+                                            setDatePickerOpen(false);
+                                          }}
+                                        >
+                                          {opt.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    style={{ ...styles.timeScrollBtn, ...styles.timeScrollBtnBottom }}
+                                    onClick={() => scrollDateOptions("down")}
+                                    aria-label="Scroll date options down"
+                                  >
+                                    ▼
+                                  </button>
+                                </div>
+                              ) : null}
 		                    </div>
 		                  </div>
 
@@ -1396,19 +1534,86 @@ export default function CheckoutDrawer({
 		                      Time slot<span style={styles.req}>*</span>
 		                    </label>
 		                    <div>
-		                      <select
-		                        style={styles.input}
-		                        value={customer.delivery_slot}
-		                        onChange={(e) =>
-		                          setCustomer({ ...customer, delivery_slot: e.target.value })
-		                        }
-		                      >
-		                        {validSlots.map((slot) => (
-		                          <option key={slot} value={slot}>
-		                            {slot}
-		                          </option>
-		                        ))}
-		                      </select>
+		                      <div ref={timePickerWrapRef} style={styles.timePickerWrap}>
+		                        <button
+		                          type="button"
+		                          style={{ ...styles.input, ...styles.timeSelectInput, ...styles.timeSelectButton }}
+		                          onClick={() => {
+		                            if (!customer.delivery_date || validSlots.length === 0) return;
+		                            setTimePickerOpen((prev) => !prev);
+		                          }}
+		                          aria-haspopup="listbox"
+		                          aria-expanded={timePickerOpen}
+		                          disabled={!customer.delivery_date}
+		                        >
+		                          <span
+		                            style={
+		                              customer.delivery_slot
+		                                ? styles.timeSelectValue
+		                                : styles.timeSelectPlaceholder
+		                            }
+		                          >
+		                            {customer.delivery_slot || "Select time slot"}
+		                          </span>
+		                          <span style={styles.timeSelectCaret} aria-hidden="true">
+		                            ▾
+		                          </span>
+		                        </button>
+		                        {timePickerOpen ? (
+		                          <div
+		                            style={styles.timePickerMenu}
+		                            role="listbox"
+		                            onWheel={(e) => e.stopPropagation()}
+		                            onTouchMove={(e) => e.stopPropagation()}
+		                          >
+                                <button
+                                  type="button"
+                                  style={{ ...styles.timeScrollBtn, ...styles.timeScrollBtnTop }}
+                                  onClick={() => scrollTimeOptions("up")}
+                                  aria-label="Scroll time options up"
+                                >
+                                  ▲
+                                </button>
+                                <div ref={timePickerListRef} style={styles.timePickerList}>
+		                              {validSlots.length === 0 ? (
+		                                <div style={styles.timePickerEmpty}>
+		                                  No slots available for selected date
+		                                </div>
+		                              ) : (
+		                                validSlots.map((slot) => {
+		                                  const isSelected = slot === customer.delivery_slot;
+		                                  return (
+		                                    <button
+		                                      key={slot}
+		                                      type="button"
+		                                      style={{
+		                                        ...styles.timePickerItem,
+		                                        ...(isSelected ? styles.timePickerItemSelected : null),
+		                                      }}
+		                                      onClick={() => {
+		                                        setCustomer({ ...customer, delivery_slot: slot });
+		                                        setTimePickerOpen(false);
+		                                      }}
+		                                      role="option"
+		                                      aria-selected={isSelected}
+		                                    >
+		                                      {slot}
+		                                    </button>
+		                                  );
+		                                })
+		                              )}
+                                </div>
+                                <button
+                                  type="button"
+                                  style={{ ...styles.timeScrollBtn, ...styles.timeScrollBtnBottom }}
+                                  onClick={() => scrollTimeOptions("down")}
+                                  aria-label="Scroll time options down"
+                                >
+                                  ▼
+                                </button>
+		                          </div>
+		                        ) : null}
+		                      </div>
 		                      {isWithin2h && !customer.express_delivery ? (
 		                        <div style={styles.inlineTimeWarn}>Need 2h+ lead time or tick express.</div>
 		                      ) : null}
@@ -1421,6 +1626,7 @@ export default function CheckoutDrawer({
 		                      <label style={styles.optInRowInline}>
 		                        <input
 		                          type="checkbox"
+                              style={styles.checkoutCheckbox}
 		                          checked={customer.express_delivery}
 		                          onChange={(e) =>
 		                            setCustomer({ ...customer, express_delivery: e.target.checked })
@@ -1431,11 +1637,14 @@ export default function CheckoutDrawer({
 		                    </div>
 		                  </div>
 		                  <div style={{ ...fieldRowStyle, alignItems: "flex-start" }}>
-		                    <label style={fieldLabelStyle}>Packaging</label>
+		                    <label style={{ ...fieldLabelStyle, ...styles.packagingLabel }}>
+                          Packaging
+                        </label>
 		                    <div style={styles.packagingOptions}>
 		                      <label style={styles.packagingOptionLine}>
 		                        <input
 		                          type="checkbox"
+                              style={styles.checkoutCheckbox}
 		                          checked={!customer.add_refer_bag}
 		                          onChange={(e) =>
 		                            setCustomer({ ...customer, add_refer_bag: !e.target.checked })
@@ -1448,6 +1657,7 @@ export default function CheckoutDrawer({
 		                      <label style={styles.packagingOptionLine}>
 		                        <input
 		                          type="checkbox"
+                              style={styles.checkoutCheckbox}
 		                          checked={customer.add_refer_bag}
 		                          onChange={(e) =>
 		                            setCustomer({ ...customer, add_refer_bag: e.target.checked })
@@ -1475,10 +1685,6 @@ export default function CheckoutDrawer({
 		                  </>
 		                ) : checkoutStep === 4 ? (
 		                  <>
-		                <div style={styles.sectionTitleRowSticky}>
-		                  <div style={styles.sectionTitle}>PAYMENT</div>
-		                  {null}
-		                </div>
 		                <div
 		                  style={isNarrow ? styles.detailsBodyScrollMobile : styles.detailsBodyScroll}
 		                >
@@ -1588,6 +1794,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 0,
     padding: "18px 0 15px",
     color: "var(--tp-text-color)",
+    position: "relative",
   },
 
   backBtn: {
@@ -1621,15 +1828,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
   },
   topProgressBar: {
-    display: "inline-grid",
+    display: "grid",
+    width: "100%",
     gridTemplateColumns: "repeat(4, minmax(96px, 1fr))",
     border: "1px solid var(--tp-border-color)",
     borderRadius: 999,
     overflow: "hidden",
   },
   topProgressAnchor: {
-    marginLeft: "clamp(96px, 10vw, 180px)",
-    display: "flex",
+    // Align progress start with the right checkout column title ("CART").
+    position: "absolute",
+    left: `calc(${BACK_BTN_W + TITLE_GAP}px + ((100% - ${BACK_BTN_W + TITLE_GAP + CONTENT_RIGHT_PAD}px - ${CHECKOUT_GRID_GAP}px) * ${CHECKOUT_LEFT_COL_RATIO}) + ${CHECKOUT_GRID_GAP}px)`,
+    right: `${CONTENT_RIGHT_PAD + PROGRESS_RIGHT_TRIM}px`,
+    top: "50%",
+    transform: "translateY(-50%)",
+    display: "block",
     alignItems: "center",
   },
   progressBarInBody: {
@@ -1644,7 +1857,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRight: "1px solid var(--tp-border-color)",
     background: "transparent",
     color: "var(--tp-text-color)",
-    opacity: 0.78,
+    opacity: 1,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1655,7 +1868,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 clamp(10px, 4vw, 40px)",
   },
   topStepChipActive: {
-    background: "var(--tp-control-bg)",
+    background: "var(--tp-control-bg-strong)",
     color: "var(--tp-text-color)",
     opacity: 1,
   },
@@ -1679,13 +1892,13 @@ const styles: Record<string, React.CSSProperties> = {
   content: {
     flex: 1,
     overflowY: "hidden",
-    padding: `10px 24px 46px ${BACK_BTN_W + TITLE_GAP}px`,
+    padding: `10px ${CONTENT_RIGHT_PAD}px 46px ${BACK_BTN_W + TITLE_GAP}px`,
   },
 
   grid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: 26,
+    gap: CHECKOUT_GRID_GAP,
     alignItems: "start",
     maxWidth: "100%",
   },
@@ -1704,11 +1917,13 @@ const styles: Record<string, React.CSSProperties> = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
+    marginTop: -12,
   },
   rightCardScroll: {
     height: "100%",
     overflowY: "auto",
     paddingRight: 8,
+    marginTop: 8,
   },
 
   sectionTitle: {
@@ -1781,9 +1996,10 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
   },
   detailsBodyScroll: {
-    maxHeight: "calc(100vh - 330px)",
+    maxHeight: "calc(100vh - 250px)",
     overflowY: "auto",
-    paddingRight: 8,
+    // Keep box right edge aligned with cart step container.
+    paddingRight: 0,
   },
   detailsBodyScrollMobile: {
     maxHeight: "none",
@@ -1837,9 +2053,10 @@ const styles: Record<string, React.CSSProperties> = {
   input: {
     width: "100%",
     height: 40,
+    fontSize: 16,
     borderRadius: 12,
     border: "1px solid var(--tp-border-color-soft)",
-    background: "var(--tp-control-bg-soft)",
+    background: "transparent",
     color: "var(--tp-text-color)",
     padding: "0 15px",
     outline: "none",
@@ -1848,9 +2065,10 @@ const styles: Record<string, React.CSSProperties> = {
   textarea: {
     width: "100%",
     minHeight: 40,
+    fontSize: 16,
     borderRadius: 12,
     border: "1px solid var(--tp-border-color-soft)",
-    background: "var(--tp-control-bg-soft)",
+    background: "transparent",
     color: "var(--tp-text-color)",
     padding: "9px 15px",
     outline: "none",
@@ -1900,25 +2118,45 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     opacity: 0.9,
   },
+  packagingLabel: {
+    paddingTop: 8,
+  },
   profileLinkBtn: {
     border: "none",
     background: "transparent",
-    color: "var(--tp-text-color)",
-    textDecoration: "underline",
+    color: "var(--tp-accent)",
+    textDecoration: "none",
     fontSize: 15,
+    opacity: 1,
     padding: 0,
+    marginLeft: 4,
     cursor: "pointer",
+  },
+  profileAddressText: {
+    display: "inline-flex",
+    alignItems: "center",
+    fontSize: 15,
+    opacity: 0.85,
+    lineHeight: "24px",
   },
   profileAddressRow: {
     marginTop: 0,
     display: "inline-flex",
     alignItems: "center",
     gap: 10,
-    fontSize: 17,
-    opacity: 0.95,
+    minHeight: 40,
+    marginBottom: 0,
   },
-  profileAddressCheckbox: {
-    transform: "scale(1.3)",
+  deliveryAddressLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 40,
+  },
+  notesLabel: {
+    paddingTop: 10,
+  },
+  checkoutCheckbox: {
+    transform: "scale(1.2)",
     transformOrigin: "center",
   },
 
@@ -1929,6 +2167,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   uploadBlockMobile: {
     marginTop: 10,
+    width: "100%",
+    justifySelf: "stretch",
   },
   uploadRow: {
     display: "flex",
@@ -1973,9 +2213,11 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap",
   },
   uploadBtnFullMobile: {
-    width: "calc(100% + 20px)",
-    marginLeft: -10,
+    width: "100%",
+    maxWidth: "100%",
+    marginLeft: 0,
     justifyContent: "center",
+    alignSelf: "stretch",
   },
 
   fileName: {
@@ -2272,6 +2514,7 @@ const styles: Record<string, React.CSSProperties> = {
   summaryTotalValue: { fontSize: 15, fontWeight: 900 },
   summaryMinorLabel: { fontSize: 15, fontWeight: 700, opacity: 0.8 },
   summaryMinorValue: { fontSize: 15, fontWeight: 800 },
+  summaryAccentText: { color: "var(--tp-accent)" },
   freeTag: {
     color: "var(--tp-accent)",
   },
@@ -2298,24 +2541,148 @@ const styles: Record<string, React.CSSProperties> = {
   datePickerWrap: {
     position: "relative",
   },
+  datePickerPopup: {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    left: 0,
+    right: 0,
+    zIndex: 45,
+    border: "1px solid rgba(255,255,255,0.34)",
+    borderRadius: 12,
+    background: "rgba(0,0,0,0.96)",
+    overflow: "hidden",
+    height: 248,
+    display: "grid",
+    gridTemplateRows: "34px 1fr 34px",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+  },
+  datePickerList: {
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+  },
+  dateOptionItem: {
+    width: "100%",
+    border: "none",
+    borderBottom: "1px solid rgba(255,255,255,0.12)",
+    background: "transparent",
+    color: "#ffffff",
+    textAlign: "left",
+    padding: "10px 14px",
+    fontSize: 15,
+    cursor: "pointer",
+  },
+  dateOptionItemSelected: {
+    color: "var(--tp-accent)",
+    background: "rgba(255,255,255,0.08)",
+    fontWeight: 700,
+  },
   datePickerBtn: {
     position: "absolute",
     right: 8,
     top: "50%",
     transform: "translateY(-50%)",
-    border: "none",
-    background: "transparent",
-    color: "var(--tp-text-color)",
+    border: "1px solid var(--tp-border-color-soft)",
+    background: "rgba(0,0,0,0.92)",
+    color: "var(--tp-accent)",
+    borderRadius: 8,
+    width: 26,
+    height: 26,
     fontSize: 16,
     cursor: "pointer",
     padding: 0,
+    lineHeight: "24px",
+    textAlign: "center",
+  },
+  dateDisplayInput: {
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    borderColor: "var(--tp-border-color-soft)",
+  },
+  timeSelectInput: {
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    borderColor: "var(--tp-border-color-soft)",
+    colorScheme: "dark",
+    accentColor: "var(--tp-accent)",
+  },
+  timePickerWrap: {
+    position: "relative",
+  },
+  timeSelectButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  timeSelectValue: {
+    color: "#ffffff",
+  },
+  timeSelectPlaceholder: {
+    color: "rgba(255,255,255,0.55)",
+  },
+  timeSelectCaret: {
+    color: "var(--tp-accent)",
+    fontSize: 16,
+    marginLeft: 10,
     lineHeight: 1,
   },
-  dateInputNative: {
+  timePickerMenu: {
     position: "absolute",
-    inset: 0,
-    opacity: 0,
-    pointerEvents: "none",
+    top: "calc(100% + 6px)",
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    border: "1px solid rgba(255,255,255,0.34)",
+    borderRadius: 12,
+    background: "rgba(0,0,0,0.96)",
+    overflow: "hidden",
+    // Top arrow + ~5 rows + bottom arrow, compact enough to stay visible.
+    height: 220,
+    display: "grid",
+    gridTemplateRows: "34px 1fr 34px",
+    overscrollBehavior: "contain",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+  },
+  timePickerList: {
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+  },
+  timeScrollBtn: {
+    border: "none",
+    background: "rgba(255,255,255,0.07)",
+    color: "var(--tp-accent)",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: 0.5,
+    cursor: "pointer",
+  },
+  timeScrollBtnTop: {
+    borderBottom: "1px solid rgba(255,255,255,0.14)",
+  },
+  timeScrollBtnBottom: {
+    borderTop: "1px solid rgba(255,255,255,0.14)",
+  },
+  timePickerItem: {
+    width: "100%",
+    border: "none",
+    borderBottom: "1px solid rgba(255,255,255,0.12)",
+    background: "transparent",
+    color: "#ffffff",
+    textAlign: "left",
+    padding: "10px 14px",
+    fontSize: 15,
+    cursor: "pointer",
+  },
+  timePickerItemSelected: {
+    color: "var(--tp-accent)",
+    background: "rgba(255,255,255,0.08)",
+    fontWeight: 700,
+  },
+  timePickerEmpty: {
+    color: "rgba(255,255,255,0.72)",
+    padding: "12px 14px",
+    fontSize: 15,
   },
 
   qrCard: {
@@ -2347,6 +2714,40 @@ const styles: Record<string, React.CSSProperties> = {
 
   qrLeft: {},
   qrRight: { display: "flex", flexDirection: "column", gap: 8 },
+  qrImage: {
+    borderRadius: 14,
+    objectFit: "cover",
+    display: "block",
+    border: "1px solid rgba(255,255,255,0.22)",
+    background: "#fff",
+  },
+  gcashLine: {
+    marginTop: 10,
+    fontSize: 15,
+    lineHeight: 1.2,
+    color: "var(--tp-text-color)",
+    textAlign: "center",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  gcashNumberBtn: {
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-accent)",
+    padding: 0,
+    margin: 0,
+    cursor: "pointer",
+    fontSize: 15,
+    fontWeight: 700,
+  },
+  copyNotice: {
+    marginLeft: 5,
+    fontSize: 12,
+    color: "var(--tp-accent)",
+    lineHeight: 1,
+  },
 
   qrText: { fontSize: 15, opacity: 0.95, lineHeight: 1.25, fontWeight: 700 },
   qrAmount: { fontSize: 25, opacity: 1, fontWeight: 900, lineHeight: 1.1 },

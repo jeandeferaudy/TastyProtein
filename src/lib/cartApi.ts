@@ -30,18 +30,36 @@ export async function fetchCartView(sessionId: string): Promise<CartViewRow[]> {
  * Requires: `carts` table with columns: id (uuid) and session_id (text/uuid)
  */
 async function getOrCreateCartId(sessionId: string): Promise<string> {
-  // 1) try find
+  const isMissingColumn = (err: unknown) =>
+    !!err &&
+    typeof err === "object" &&
+    String((err as { code?: unknown }).code ?? "") === "42703";
+
+  // 1) Prefer an "open" cart when schema supports `checked_out_at`.
+  const openFound = await supabase
+    .from("carts")
+    .select("id")
+    .eq("session_id", sessionId)
+    .is("checked_out_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!openFound.error && openFound.data?.id) return String(openFound.data.id);
+  if (openFound.error && !isMissingColumn(openFound.error)) throw openFound.error;
+
+  // 2) Fallback: latest cart for this session (legacy schema without checked_out_at).
   const found = await supabase
     .from("carts")
     .select("id")
     .eq("session_id", sessionId)
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (found.error) throw found.error;
   if (found.data?.id) return String(found.data.id);
 
-  // 2) create
+  // 3) create
   const created = await supabase
     .from("carts")
     .insert([{ session_id: sessionId }])

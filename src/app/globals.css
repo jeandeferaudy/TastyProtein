@@ -6,6 +6,7 @@
   --tp-border-color: rgba(255, 255, 255, 0.2);
   --tp-border-color-soft: rgba(255, 255, 255, 0.14);
   --tp-control-bg: rgba(255, 255, 255, 0.08);
+  --tp-control-bg-strong: rgba(255, 255, 255, 0.096);
   --tp-control-bg-soft: rgba(255, 255, 255, 0.06);
   --tp-surface-bg: rgba(20, 20, 20, 0.55);
   --tp-nav-fg: #111111;
@@ -29,6 +30,7 @@
   --tp-border-color: rgba(17, 17, 17, 0.24);
   --tp-border-color-soft: rgba(17, 17, 17, 0.16);
   --tp-control-bg: rgba(0, 0, 0, 0.06);
+  --tp-control-bg-strong: rgba(0, 0, 0, 0.072);
   --tp-control-bg-soft: rgba(0, 0, 0, 0.045);
   --tp-surface-bg: rgba(255, 255, 255, 0.68);
   --tp-nav-fg: #111111;
@@ -158,4 +160,8 @@ a {
 .tp-sheet-slide-up {
   animation: tpSheetSlideUp 220ms ease-out both;
   will-change: transform, opacity;
+}
+@keyframes tp-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }

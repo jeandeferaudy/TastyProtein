@@ -18,6 +18,7 @@ import ZoneStyleModal, {
   type ZoneStyleDraft,
   type ThemeColorsDraft,
   type BannerDraft,
+  type CheckoutPaymentDraft,
 } from "@/components/ZoneStyleModal";
 import LogoEditorModal from "@/components/LogoEditorModal";
 
@@ -82,6 +83,8 @@ type BrandingRow = {
   logo_url: string | null;
   logo_url_dark?: string | null;
   logo_url_light?: string | null;
+  gcash_qr_url?: string | null;
+  gcash_phone?: string | null;
 };
 
 type ThemeColorsRow = ThemeColorsDraft & {
@@ -94,6 +97,24 @@ type BannerRow = {
   link_url: string | null;
   sort_order: number | null;
 };
+
+function normalizeInventorySnapshot(row: Record<string, unknown>): {
+  qty_on_hand: number;
+  qty_allocated: number;
+  qty_available: number;
+} {
+  const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
+  const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
+  const rawAvailable = row.qty_available == null ? Number.NaN : Number(row.qty_available);
+  const qtyAvailable = Number.isFinite(rawAvailable)
+    ? Math.max(0, rawAvailable)
+    : Math.max(qtyOnHand - qtyAllocated, 0);
+  return {
+    qty_on_hand: qtyOnHand,
+    qty_allocated: qtyAllocated,
+    qty_available: qtyAvailable,
+  };
+}
 
 function SettingsIcon({ size = 16 }: { size?: number }) {
   return (
@@ -199,7 +220,7 @@ export default function Page() {
   const [allOrders, setAllOrders] = React.useState<MyOrderItem[]>([]);
   const [selectedMyOrderId, setSelectedMyOrderId] = React.useState<string | null>(null);
   const [selectedAllOrderId, setSelectedAllOrderId] = React.useState<string | null>(null);
-  const [orderDrawerSource, setOrderDrawerSource] = React.useState<"my" | "all" | null>(null);
+  const [orderDrawerSource, setOrderDrawerSource] = React.useState<"my" | "all" | "public" | null>(null);
   const [selectedOrderDetail, setSelectedOrderDetail] = React.useState<OrderDetail | null>(
     null
   );
@@ -217,6 +238,10 @@ export default function Page() {
     dark: "",
     light: "",
   });
+  const [checkoutPaymentDraft, setCheckoutPaymentDraft] = React.useState<CheckoutPaymentDraft>({
+    gcash_qr_url: "",
+    gcash_phone: "",
+  });
   const [logoEditorOpen, setLogoEditorOpen] = React.useState<boolean>(false);
   const [logoEditorSaving, setLogoEditorSaving] = React.useState<boolean>(false);
   const [logoEditorError, setLogoEditorError] = React.useState<string>("");
@@ -226,7 +251,7 @@ export default function Page() {
   const DEFAULT_THEME_COLORS_BY_MODE: Record<"dark" | "light", ThemeColorsDraft> = React.useMemo(
     () => ({
       dark: {
-        accent_color: "#66c7ff",
+        accent_color: "#b89958",
         text_color: "#ffffff",
         line_color: "#ffffff",
         button_border_color: "#ffffff",
@@ -235,7 +260,7 @@ export default function Page() {
         background_color: "#000000",
       },
       light: {
-        accent_color: "#2b8cff",
+        accent_color: "#b89958",
         text_color: "#111111",
         line_color: "#111111",
         button_border_color: "#111111",
@@ -323,6 +348,11 @@ export default function Page() {
     country: "Philippines",
   });
   const [paymentFile, setPaymentFile] = React.useState<File | null>(null);
+  const [checkoutOpening, setCheckoutOpening] = React.useState<boolean>(false);
+  const [orderPlacedModal, setOrderPlacedModal] = React.useState<{
+    orderId: string;
+    orderNumber: string;
+  } | null>(null);
   const resolvedGridView: "list" | "4" | "5" = gridView;
   const mobileLogoHeight = Math.round(136 * 0.805);
   const desktopNavLeftWidth = Math.round(252 * 1.15);
@@ -447,13 +477,7 @@ export default function Page() {
       for (const row of (inventoryResult.data ?? []) as Array<Record<string, unknown>>) {
         const id = String(row.product_id ?? "");
         if (!id) continue;
-        const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
-        const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
-        inventoryById.set(id, {
-          qty_on_hand: qtyOnHand,
-          qty_allocated: qtyAllocated,
-          qty_available: Math.max(qtyOnHand - qtyAllocated, 0),
-        });
+        inventoryById.set(id, normalizeInventorySnapshot(row));
       }
 
       const imagesById: Record<string, ProductImage[]> = {};
@@ -556,7 +580,7 @@ export default function Page() {
     const loadLogo = async () => {
       const { data, error } = await supabase
         .from("ui_branding")
-        .select("logo_url,logo_url_dark,logo_url_light")
+        .select("logo_url,logo_url_dark,logo_url_light,gcash_qr_url,gcash_phone")
         .limit(1)
         .maybeSingle();
       let row = (data ?? null) as BrandingRow | null;
@@ -573,6 +597,10 @@ export default function Page() {
         dark: (row?.logo_url_dark ?? "").trim() || fallback,
         light: (row?.logo_url_light ?? "").trim() || fallback,
       };
+      setCheckoutPaymentDraft({
+        gcash_qr_url: String(row?.gcash_qr_url ?? "").trim(),
+        gcash_phone: String(row?.gcash_phone ?? "").trim(),
+      });
       try {
         window.localStorage.setItem("tp_logo_urls_by_mode", JSON.stringify(next));
       } catch {
@@ -585,18 +613,6 @@ export default function Page() {
 
   React.useEffect(() => {
     const loadThemeColors = async () => {
-      try {
-        const raw = window.localStorage.getItem("tp_theme_colors_by_mode");
-        if (raw) {
-          const cached = JSON.parse(raw) as Partial<Record<"dark" | "light", ThemeColorsDraft>>;
-          setThemeColorsByMode((prev) => ({
-            dark: { ...prev.dark, ...(cached.dark ?? {}) },
-            light: { ...prev.light, ...(cached.light ?? {}) },
-          }));
-        }
-      } catch {
-        // ignore storage errors
-      }
       const { data, error } = await supabase
         .from("ui_theme_colors")
         .select(
@@ -663,7 +679,7 @@ export default function Page() {
 
   React.useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--tp-accent", themeColors.accent_color || "#66c7ff");
+    root.style.setProperty("--tp-accent", themeColors.accent_color || "#b89958");
     root.style.setProperty("--tp-text-color", themeColors.text_color || "#ffffff");
     root.style.setProperty("--tp-border-color", themeColors.line_color || "#ffffff");
     root.style.setProperty(
@@ -871,7 +887,7 @@ export default function Page() {
   );
 
   const uploadUiAsset = React.useCallback(
-    async (file: File, kind: "zone" | "logo" | "banner"): Promise<string> => {
+    async (file: File, kind: "zone" | "logo" | "banner" | "payment"): Promise<string> => {
       const extension = file.name.includes(".")
         ? file.name.split(".").pop()?.toLowerCase() ?? "jpg"
         : "jpg";
@@ -972,6 +988,36 @@ export default function Page() {
       return false;
     }
   }, [formatSupabaseError]);
+
+  const saveCheckoutPaymentDraft = React.useCallback(
+    async (next: CheckoutPaymentDraft): Promise<boolean> => {
+      try {
+        const payload = {
+          id: 1,
+          gcash_qr_url: String(next.gcash_qr_url ?? "").trim() || null,
+          gcash_phone: String(next.gcash_phone ?? "").trim() || null,
+        };
+        const { error } = await supabase
+          .from("ui_branding")
+          .upsert(payload, { onConflict: "id" });
+        if (error) throw error;
+        setCheckoutPaymentDraft({
+          gcash_qr_url: String(next.gcash_qr_url ?? "").trim(),
+          gcash_phone: String(next.gcash_phone ?? "").trim(),
+        });
+        return true;
+      } catch (e: unknown) {
+        const message = formatSupabaseError(
+          e,
+          "Failed to save checkout payment settings. Apply DB migration for ui_branding first."
+        );
+        setZoneEditorError(message);
+        console.error("[checkout-payment] save failed", e);
+        return false;
+      }
+    },
+    [formatSupabaseError]
+  );
 
   const saveThemeColors = React.useCallback(
     async (next: ThemeColorsDraft): Promise<boolean> => {
@@ -1369,6 +1415,7 @@ React.useEffect(() => {
   const cartItemsForDisplay = React.useMemo(() => {
     const enriched = cartItems.map((item) => {
       const product = products.find((p) => String(p.id) === item.productId);
+      const hasStockSnapshot = !!product && !loadingProducts;
       return {
         ...item,
         country: item.country ?? product?.country_of_origin ?? null,
@@ -1376,8 +1423,11 @@ React.useEffect(() => {
         temperature: product?.temperature ?? null,
         thumbnailUrl: item.thumbnailUrl ?? product?.thumbnail_url ?? null,
         unlimitedStock: Boolean(product?.unlimited_stock),
-        qtyAvailable: Math.max(0, Number(product?.qty_available ?? 0)),
+        qtyAvailable: hasStockSnapshot
+          ? Math.max(0, Number(product?.qty_available ?? 0))
+          : undefined,
         outOfStock:
+          hasStockSnapshot &&
           !Boolean(product?.unlimited_stock) &&
           Math.max(0, Number(product?.qty_available ?? 0)) < 1,
       };
@@ -1392,12 +1442,13 @@ React.useEffect(() => {
       if (sizeCmp !== 0) return sizeCmp;
       return String(a.productId ?? "").localeCompare(String(b.productId ?? ""));
     });
-  }, [cartItems, products]);
+  }, [cartItems, loadingProducts, products]);
   const hasCartQtyOverLimit = React.useMemo(
     () =>
       cartItemsForDisplay.some(
         (it) =>
           !Boolean(it.unlimitedStock) &&
+          typeof it.qtyAvailable === "number" &&
           Math.max(0, Number(it.qty) || 0) > Math.max(0, Number(it.qtyAvailable ?? 0))
       ),
     [cartItemsForDisplay]
@@ -1598,7 +1649,8 @@ React.useEffect(() => {
     }
   }, [closePrimaryDrawers]);
 
-  const openCheckout = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+  const openCheckout = React.useCallback(async (opts?: { skipNavigate?: boolean }) => {
+    setCheckoutOpening(true);
     const loadProfileForCheckout = async () => {
       if (!authUserId) {
         setProfileHasAddress(false);
@@ -1653,21 +1705,26 @@ React.useEffect(() => {
       }));
     };
 
-    setCartOpen(false);
-    setDetailsOpen(false);
-    setOrdersOpen(false);
-    setAllOrdersOpen(false);
-    setInventoryOpen(false);
-    setOrderDrawerSource(null);
-    setSelectedOrderDetail(null);
-    if (hasCartQtyOverLimit) {
-      alert("You need to reduce some quantites in your cart.");
-      return;
-    }
-    void loadProfileForCheckout();
-    setPanel("checkout");
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/checkout");
+    try {
+      setCartOpen(false);
+      setDetailsOpen(false);
+      setOrdersOpen(false);
+      setAllOrdersOpen(false);
+      setInventoryOpen(false);
+      setOrderDrawerSource(null);
+      setSelectedOrderDetail(null);
+      if (hasCartQtyOverLimit) {
+        alert("You need to reduce some quantites in your cart.");
+        return;
+      }
+      const profileTask = loadProfileForCheckout();
+      setPanel("checkout");
+      if (!opts?.skipNavigate && typeof window !== "undefined") {
+        window.history.pushState({}, "", "/checkout");
+      }
+      await profileTask;
+    } finally {
+      setCheckoutOpening(false);
     }
   }, [authEmail, authPhone, authUserId, hasCartQtyOverLimit]);
 
@@ -1859,13 +1916,7 @@ React.useEffect(() => {
       for (const row of (data ?? []) as Array<Record<string, unknown>>) {
         const id = String(row.product_id ?? "");
         if (!id) continue;
-        const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
-        const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
-        byProductId.set(id, {
-          qty_on_hand: qtyOnHand,
-          qty_allocated: qtyAllocated,
-          qty_available: Math.max(qtyOnHand - qtyAllocated, 0),
-        });
+        byProductId.set(id, normalizeInventorySnapshot(row));
       }
 
       const imagesById: Record<string, ProductImage[]> = {};
@@ -2107,12 +2158,24 @@ React.useEffect(() => {
   );
 
   const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    // Cart should never coexist with orders/all-orders drawers.
+    closePrimaryDrawers();
     setInventoryOpen(false);
     setCartOpen(true);
     if (!opts?.skipNavigate && typeof window !== "undefined") {
       window.history.pushState({}, "", "/cart");
     }
-  }, []);
+  }, [closePrimaryDrawers]);
+
+  React.useEffect(() => {
+    if (!cartOpen) return;
+    // Defensive guard: while cart is visible, force all-orders context off.
+    if (allOrdersOpen) setAllOrdersOpen(false);
+    if (orderDrawerSource === "all") {
+      setOrderDrawerSource(null);
+      setSelectedOrderDetail(null);
+    }
+  }, [allOrdersOpen, cartOpen, orderDrawerSource]);
 
   const resolveRouteWithoutCart = React.useCallback(() => {
     if (panel === "checkout") return "/checkout";
@@ -2229,10 +2292,11 @@ React.useEffect(() => {
             openShop({ skipNavigate: true });
             return;
           }
-          if (!requireAuth({ path, search })) return;
-          setOrderDrawerSource("my");
+          setOrderDrawerSource("public");
           setOrdersOpen(false);
           setAllOrdersOpen(false);
+          setPanel(null);
+          setCartOpen(false);
           void loadAndSelectOrder(id);
           return;
         }
@@ -2318,9 +2382,27 @@ React.useEffect(() => {
       .join(", ");
   }, []);
 
+  const openOrderSummary = React.useCallback(
+    (orderId: string, opts?: { skipNavigate?: boolean }) => {
+      closePrimaryDrawers();
+      setPanel(null);
+      setCartOpen(false);
+      setOrderDrawerSource("public");
+      setOrdersOpen(false);
+      setAllOrdersOpen(false);
+      void loadAndSelectOrder(orderId);
+      if (!opts?.skipNavigate && typeof window !== "undefined") {
+        const params = new URLSearchParams();
+        params.set("id", orderId);
+        window.history.pushState({}, "", `/order?${params.toString()}`);
+      }
+    },
+    [closePrimaryDrawers, loadAndSelectOrder]
+  );
+
   const submitCheckout = React.useCallback(async (payload: CheckoutSubmitPayload) => {
-    const sessionId = sessionIdRef.current;
-    if (!sessionId || sessionId === "server") return;
+    let activeSessionId = sessionIdRef.current;
+    if (!activeSessionId || activeSessionId === "server") return;
 
     if (!paymentFile) {
       alert("Please upload your payment confirmation screenshot first.");
@@ -2336,7 +2418,7 @@ React.useEffect(() => {
       : "jpg";
     const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
     const stamp = Date.now();
-    const ownerKey = user?.id ? `u-${user.id}` : `anon-${sessionId}`;
+    const ownerKey = user?.id ? `u-${user.id}` : `anon-${activeSessionId}`;
     const path = `${ownerKey}/${stamp}.${safeExt}`;
 
     const { error: uploadError } = await supabase.storage
@@ -2359,42 +2441,130 @@ React.useEffect(() => {
       .filter(Boolean)
       .join(" | ");
 
-    let data: unknown;
-    let error: { message: string } | null = null;
+    const runCheckoutRpc = async (sid: string) => {
+      let data: unknown;
+      let error: { message: string } | null = null;
 
-    const v2 = await supabase.rpc("checkout_cart_v2", {
-      p_session_id: sessionId,
-      p_full_name: customer.full_name,
-      p_email: customerEmail,
-      p_phone: customer.phone,
-      p_address: composeAddress(customer),
-      p_postal_code: payload.postal_code,
-      p_notes: composedNotes,
-      p_delivery_date: payload.delivery_date,
-      p_delivery_slot: payload.delivery_slot,
-      p_express_delivery: payload.express_delivery,
-      p_add_thermal_bag: payload.add_thermal_bag,
-      p_subtotal: payload.subtotal,
-      p_delivery_fee: payload.delivery_fee,
-      p_thermal_bag_fee: payload.thermal_bag_fee,
-      p_total: payload.total,
-      p_payment_proof_url: path,
-    });
-    data = v2.data;
-    error = (v2.error as any) ?? null;
-
-    // Backward compatibility until SQL v2 is applied.
-    if (error && String(error.message).toLowerCase().includes("checkout_cart_v2")) {
-      const v1 = await supabase.rpc("checkout_cart", {
-        p_session_id: sessionId,
+      const v2 = await supabase.rpc("checkout_cart_v2", {
+        p_session_id: sid,
         p_full_name: customer.full_name,
+        p_email: customerEmail,
         p_phone: customer.phone,
         p_address: composeAddress(customer),
+        p_postal_code: payload.postal_code,
         p_notes: composedNotes,
+        p_delivery_date: payload.delivery_date,
+        p_delivery_slot: payload.delivery_slot,
+        p_express_delivery: payload.express_delivery,
+        p_add_thermal_bag: payload.add_thermal_bag,
+        p_subtotal: payload.subtotal,
+        p_delivery_fee: payload.delivery_fee,
+        p_thermal_bag_fee: payload.thermal_bag_fee,
+        p_total: payload.total,
         p_payment_proof_url: path,
       });
-      data = v1.data;
-      error = (v1.error as any) ?? null;
+      data = v2.data;
+      error = (v2.error as any) ?? null;
+
+      // Backward compatibility until SQL v2 is applied.
+      if (error && String(error.message).toLowerCase().includes("checkout_cart_v2")) {
+        const v1 = await supabase.rpc("checkout_cart", {
+          p_session_id: sid,
+          p_full_name: customer.full_name,
+          p_phone: customer.phone,
+          p_address: composeAddress(customer),
+          p_notes: composedNotes,
+          p_payment_proof_url: path,
+        });
+        data = v1.data;
+        error = (v1.error as any) ?? null;
+      }
+      return { data, error };
+    };
+
+    let { data, error } = await runCheckoutRpc(activeSessionId);
+    const noOpenCart =
+      !!error &&
+      String(error.message ?? "")
+        .toLowerCase()
+        .includes("no open cart for session_id");
+    if (noOpenCart && cartItems.length > 0) {
+      // Recover legacy/stale cart state by forcing a fresh cart for this session, then retry once.
+      // Some DB functions detect "open cart" by cart metadata and can ignore older/closed carts.
+      try {
+        const created = await supabase
+          .from("carts")
+          .insert([{ session_id: activeSessionId }])
+          .select("id")
+          .single();
+
+        const freshCartId = created.data?.id ? String(created.data.id) : "";
+        if (created.error || !freshCartId) {
+          throw created.error ?? new Error("Failed to create fresh cart.");
+        }
+
+        const lines = cartItems
+          .map((it) => ({
+            cart_id: freshCartId,
+            product_id: String(it.productId),
+            qty: Math.max(0, Number(it.qty) || 0),
+          }))
+          .filter((line) => line.product_id && line.qty > 0);
+
+        if (lines.length > 0) {
+          const up = await supabase.from("cart_lines").upsert(lines, {
+            onConflict: "cart_id,product_id",
+          });
+          if (up.error) throw up.error;
+        }
+      } catch (recoveryErr) {
+        console.warn("[checkout] fresh cart recovery failed, fallback to setCartLineQty:", recoveryErr);
+        await Promise.all(
+          cartItems.map((it) =>
+            setCartLineQty(activeSessionId, String(it.productId), Math.max(0, Number(it.qty) || 0)).catch(
+              () => null
+            )
+          )
+        );
+      }
+      await refreshCart();
+      const retried = await runCheckoutRpc(activeSessionId);
+      data = retried.data;
+      error = retried.error;
+
+      const stillNoOpenCart =
+        !!error &&
+        String(error.message ?? "")
+          .toLowerCase()
+          .includes("no open cart for session_id");
+      if (stillNoOpenCart) {
+        const freshSid =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        try {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("tastyprotein_session_id", freshSid);
+          }
+        } catch {
+          // ignore storage write failures
+        }
+        sessionIdRef.current = freshSid;
+        (globalThis as { __TP_SESSION_ID?: string }).__TP_SESSION_ID = freshSid;
+        activeSessionId = freshSid;
+
+        await Promise.all(
+          cartItems.map((it) =>
+            setCartLineQty(activeSessionId, String(it.productId), Math.max(0, Number(it.qty) || 0)).catch(
+              () => null
+            )
+          )
+        );
+        await refreshCart();
+        const rotated = await runCheckoutRpc(activeSessionId);
+        data = rotated.data;
+        error = rotated.error;
+      }
     }
 
     if (error) {
@@ -2430,21 +2600,29 @@ React.useEffect(() => {
       }
     }
 
-    if (orderId && customerEmail.trim()) {
+    let resolvedOrderNumber = "";
+    if (orderId) {
       try {
         const { data: orderMeta } = await supabase
           .from("orders")
           .select("order_number")
           .eq("id", orderId)
           .maybeSingle();
-        const orderNumber = String(orderMeta?.order_number ?? "").trim();
+        resolvedOrderNumber = String(orderMeta?.order_number ?? "").trim();
+      } catch {
+        // best effort only
+      }
+    }
+
+    if (orderId && customerEmail.trim()) {
+      try {
         const origin =
           typeof window !== "undefined" ? window.location.origin : undefined;
         const emailPayload = {
           email: customerEmail.trim(),
           name: customer.full_name?.trim() || null,
           orderId,
-          orderNumber: orderNumber || null,
+          orderNumber: resolvedOrderNumber || null,
           origin,
         };
         const response = await fetch("/api/send-order-email", {
@@ -2464,7 +2642,7 @@ React.useEffect(() => {
     // Try to clear the cart lines on the backend for this session.
     await Promise.all(
       cartItems.map((it) =>
-        setCartLineQty(sessionId, String(it.productId), 0).catch(() => null)
+        setCartLineQty(activeSessionId, String(it.productId), 0).catch(() => null)
       )
     );
     await refreshCart();
@@ -2500,8 +2678,15 @@ React.useEffect(() => {
     setCreateAccountFromDetails(false);
     setSaveAddressToProfile(false);
     setPanel(null);
-    scrollToProducts();
-    alert(`Order created: ${data}`);
+    if (orderId) {
+      setOrderPlacedModal({
+        orderId,
+        orderNumber: resolvedOrderNumber || orderId.slice(0, 8).toUpperCase(),
+      });
+    } else {
+      scrollToProducts();
+      alert("Your order has been placed successfully.");
+    }
   }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts]);
 
   const selectedProductImages: ProductImage[] = React.useMemo(() => {
@@ -3044,6 +3229,8 @@ React.useEffect(() => {
         profileAddress={profileAddress}
         paymentFile={paymentFile}
         setPaymentFile={setPaymentFile}
+        gcashQrUrl={checkoutPaymentDraft.gcash_qr_url}
+        gcashPhone={checkoutPaymentDraft.gcash_phone}
         onBack={backToList}
         onSubmit={handleCheckoutSubmit as (payload: CheckoutSubmitPayload) => void}
         onOpenProfile={openProfileDrawer}
@@ -3064,6 +3251,7 @@ React.useEffect(() => {
         onRemove={removeFromCart}
         onSetQty={setQtyInCart}
         onCheckout={openCheckout}
+        checkoutLoading={checkoutOpening}
         formatMoney={formatMoney}
       />
 
@@ -3148,6 +3336,10 @@ React.useEffect(() => {
           const source = orderDrawerSource;
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
+          if (source === "public") {
+            openShop();
+            return;
+          }
           if (source === "my") {
             setOrdersOpen(true);
             return;
@@ -3157,6 +3349,30 @@ React.useEffect(() => {
           }
         }}
       />
+
+      {orderPlacedModal ? (
+        <div style={styles.orderPlacedBackdrop}>
+          <div style={styles.orderPlacedModal}>
+            <div style={styles.orderPlacedTitle}>
+              Your order number {orderPlacedModal.orderNumber} has been placed successfully.
+            </div>
+            <div style={styles.orderPlacedText}>
+              You will be redirected to your order summary now.
+            </div>
+            <button
+              type="button"
+              style={styles.orderPlacedOkBtn}
+              onClick={() => {
+                const orderId = orderPlacedModal.orderId;
+                setOrderPlacedModal(null);
+                openOrderSummary(orderId);
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <ZoneStyleModal
         isOpen={zoneEditorOpen}
@@ -3186,6 +3402,15 @@ React.useEffect(() => {
         onUploadBanner={
           zoneEditorTarget === "main"
             ? (file) => uploadUiAsset(file, "banner")
+            : undefined
+        }
+        paymentDraft={zoneEditorTarget === "main" ? checkoutPaymentDraft : undefined}
+        onSavePaymentDraft={
+          zoneEditorTarget === "main" ? saveCheckoutPaymentDraft : undefined
+        }
+        onUploadPaymentQr={
+          zoneEditorTarget === "main"
+            ? (file) => uploadUiAsset(file, "payment")
             : undefined
         }
       />
@@ -3644,5 +3869,50 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 auto",
     opacity: 0.7,
     paddingBottom: 40,
+  },
+  orderPlacedBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.58)",
+    backdropFilter: "blur(2px)",
+    WebkitBackdropFilter: "blur(2px)",
+    zIndex: 1400,
+    display: "grid",
+    placeItems: "center",
+    padding: 16,
+  },
+  orderPlacedModal: {
+    width: "min(560px, 92vw)",
+    borderRadius: 12,
+    border: "1px solid var(--tp-border-color)",
+    background: "rgba(10,10,10,0.88)",
+    padding: 18,
+    color: "var(--tp-text-color)",
+    display: "grid",
+    gap: 10,
+  },
+  orderPlacedTitle: {
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1.35,
+  },
+  orderPlacedText: {
+    fontSize: 15,
+    opacity: 0.92,
+    lineHeight: 1.35,
+  },
+  orderPlacedOkBtn: {
+    width: 92,
+    height: 36,
+    justifySelf: "end",
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 800,
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
   },
 };
