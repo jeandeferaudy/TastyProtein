@@ -14,6 +14,7 @@ import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
 import InventoryDrawer, { type InventoryLine } from "@/components/InventoryDrawer";
+import AnalyticsDrawer from "@/components/AnalyticsDrawer";
 import ZoneStyleModal, {
   type ZoneStyleDraft,
   type ThemeColorsDraft,
@@ -35,12 +36,15 @@ import { fetchCartView, setCartLineQty } from "@/lib/cartApi";
 import * as Cart from "@/lib/cart";
 import {
   addOrderLinesByAdmin,
+  deleteOrderByAdmin,
   fetchOrderDetail,
   fetchOrders,
   updateOrderAmountPaid,
+  updateOrderAdminFields,
   updateOrderPaymentProof,
   updateOrderLinePackedQty,
   updateOrderStatuses,
+  type OrderAdminPatch,
   type OrderDetail,
   type OrderStatusPatch,
 } from "@/lib/ordersApi";
@@ -49,7 +53,7 @@ import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 
 type Panel = null | "product" | "checkout" | "edit";
 type ZoneName = "header" | "navbar" | "main";
-type FilterKey = "type" | "cut" | "country" | "preparation" | "temperature";
+type FilterKey = "status" | "type" | "cut" | "country" | "preparation" | "temperature";
 
 type ZoneRow = {
   zone: ZoneName;
@@ -146,6 +150,7 @@ export default function Page() {
       full_name: "",
       email: "",
       phone: "",
+      placed_for_someone_else: false,
       attention_to: "",
       line1: "",
       line2: "",
@@ -191,6 +196,7 @@ export default function Page() {
   >({});
   const [loadingProducts, setLoadingProducts] = React.useState<boolean>(true);
   const [selectedFilters, setSelectedFilters] = React.useState<Record<FilterKey, string[]>>({
+    status: [],
     type: [],
     cut: [],
     country: [],
@@ -213,6 +219,7 @@ export default function Page() {
   const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
   const [allOrdersOpen, setAllOrdersOpen] = React.useState<boolean>(false);
   const [inventoryOpen, setInventoryOpen] = React.useState<boolean>(false);
+  const [analyticsOpen, setAnalyticsOpen] = React.useState<boolean>(false);
   const [inventoryRows, setInventoryRows] = React.useState<InventoryLine[]>([]);
   const [loadingInventory, setLoadingInventory] = React.useState<boolean>(false);
   const [editMode, setEditMode] = React.useState<boolean>(false);
@@ -225,6 +232,7 @@ export default function Page() {
     null
   );
   const [loadingOrderDetail, setLoadingOrderDetail] = React.useState<boolean>(false);
+  const [submittingCheckout, setSubmittingCheckout] = React.useState<boolean>(false);
   const [adminAllProductsMode, setAdminAllProductsMode] = React.useState<boolean>(false);
   const [zoneStylesByMode, setZoneStylesByMode] = React.useState<
     Record<"dark" | "light", Record<ZoneName, ZoneStyleDraft>>
@@ -352,7 +360,12 @@ export default function Page() {
   const [orderPlacedModal, setOrderPlacedModal] = React.useState<{
     orderId: string;
     orderNumber: string;
+    emailSent: boolean;
+    summaryReady: boolean;
+    summaryTimedOut: boolean;
+    isPublic: boolean;
   } | null>(null);
+  const [publicOrderNotice, setPublicOrderNotice] = React.useState<string>("");
   const resolvedGridView: "list" | "4" | "5" = gridView;
   const mobileLogoHeight = Math.round(136 * 0.805);
   const desktopNavLeftWidth = Math.round(252 * 1.15);
@@ -797,18 +810,34 @@ export default function Page() {
 
       setCustomer((prev: CustomerDraft) => ({
         ...prev,
-        full_name: prev.full_name || fullName,
-        email: prev.email || authEmail || "",
-        phone: prev.phone || profilePhone || authPhone || "",
-        attention_to: prev.attention_to || String(data?.attention_to ?? "").trim(),
-        line1: prev.line1 || String(data?.address_line1 ?? "").trim(),
-        line2: prev.line2 || String(data?.address_line2 ?? "").trim(),
-        barangay: prev.barangay || String(data?.barangay ?? "").trim(),
-        city: prev.city || String(data?.city ?? "").trim(),
-        province: prev.province || String(data?.province ?? "").trim(),
-        postal_code: prev.postal_code || String(data?.postal_code ?? "").trim(),
-        country: prev.country || String(data?.country ?? "").trim() || "Philippines",
-        notes: prev.notes || deliveryNote,
+        full_name: prev.placed_for_someone_else ? prev.full_name : prev.full_name || fullName,
+        email: prev.placed_for_someone_else ? prev.email : prev.email || authEmail || "",
+        phone: prev.placed_for_someone_else ? prev.phone : prev.phone || profilePhone || authPhone || "",
+        attention_to: prev.placed_for_someone_else
+          ? prev.attention_to
+          : prev.attention_to || String(data?.attention_to ?? "").trim(),
+        line1: prev.placed_for_someone_else
+          ? prev.line1
+          : prev.line1 || String(data?.address_line1 ?? "").trim(),
+        line2: prev.placed_for_someone_else
+          ? prev.line2
+          : prev.line2 || String(data?.address_line2 ?? "").trim(),
+        barangay: prev.placed_for_someone_else
+          ? prev.barangay
+          : prev.barangay || String(data?.barangay ?? "").trim(),
+        city: prev.placed_for_someone_else
+          ? prev.city
+          : prev.city || String(data?.city ?? "").trim(),
+        province: prev.placed_for_someone_else
+          ? prev.province
+          : prev.province || String(data?.province ?? "").trim(),
+        postal_code: prev.placed_for_someone_else
+          ? prev.postal_code
+          : prev.postal_code || String(data?.postal_code ?? "").trim(),
+        country: prev.placed_for_someone_else
+          ? prev.country || "Philippines"
+          : prev.country || String(data?.country ?? "").trim() || "Philippines",
+        notes: prev.placed_for_someone_else ? prev.notes : prev.notes || deliveryNote,
       }));
 
       if (firstName) {
@@ -1196,6 +1225,7 @@ export default function Page() {
     setOrdersOpen(false);
     setAllOrdersOpen(false);
     setInventoryOpen(false);
+    setAnalyticsOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
   }, []);
@@ -1313,6 +1343,15 @@ React.useEffect(() => {
   const filterGroups = React.useMemo(
     () =>
       [
+        ...(isAdmin && adminAllProductsMode
+          ? [
+              {
+                key: "status" as const,
+                label: "Status",
+                valueOf: (p: DbProduct) => String(p.status ?? "").trim(),
+              },
+            ]
+          : []),
         {
           key: "type" as const,
           label: "Type",
@@ -1339,11 +1378,12 @@ React.useEffect(() => {
           valueOf: (p: DbProduct) => String(p.temperature ?? "").trim(),
         },
       ] as const,
-    []
+    [adminAllProductsMode, isAdmin]
   );
 
   const filterOptionsByGroup = React.useMemo(() => {
     const next: Record<FilterKey, Array<{ key: string; label: string }>> = {
+      status: [],
       type: [],
       cut: [],
       country: [],
@@ -1369,6 +1409,7 @@ React.useEffect(() => {
   React.useEffect(() => {
     setSelectedFilters((prev) => {
       const next: Record<FilterKey, string[]> = {
+        status: [],
         type: [],
         cut: [],
         country: [],
@@ -1558,7 +1599,7 @@ React.useEffect(() => {
       setPanel("edit");
       if (!opts?.skipNavigate && typeof window !== "undefined") {
         const params = new URLSearchParams({ id: String(id) });
-        window.history.pushState({}, "", `/shop/product?${params.toString()}`);
+        window.history.pushState({}, "", `/shop/product/edit?${params.toString()}`);
       }
     },
     [isAdmin, panel]
@@ -1589,14 +1630,25 @@ React.useEffect(() => {
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
     setPanel("edit");
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams({ id: String(data.id) });
+      window.history.pushState({}, "", `/shop/product/edit?${params.toString()}`);
+    }
   }, [isAdmin, loadCatalog]);
 
   const closeEditor = React.useCallback(() => {
     if (editorReturnToProduct && selectedId) {
       setPanel("product");
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams({ id: String(selectedId) });
+        window.history.pushState({}, "", `/shop/product?${params.toString()}`);
+      }
       return;
     }
     closePrimaryDrawers();
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", isAdmin ? "/allproducts" : "/shop");
+    }
     requestAnimationFrame(() => {
       const el = listScrollRef.current;
       if (el) el.scrollTop = listScrollTopRef.current;
@@ -1604,7 +1656,7 @@ React.useEffect(() => {
         window.scrollTo({ top: windowScrollTopRef.current, left: 0, behavior: "auto" });
       }
     });
-  }, [closePrimaryDrawers, editorReturnToProduct, selectedId]);
+  }, [closePrimaryDrawers, editorReturnToProduct, isAdmin, selectedId]);
 
   const updateProductStatus = React.useCallback(
     async (id: string, nextStatus: "Active" | "Disabled" | "Archived") => {
@@ -1690,18 +1742,38 @@ React.useEffect(() => {
 
       setCustomer((prev: CustomerDraft) => ({
         ...prev,
-        full_name: prev.full_name || fullName,
-        email: prev.email || authEmail || "",
-        phone: prev.phone || String(data?.phone ?? "").trim() || authPhone || "",
-        attention_to: prev.attention_to || String(data?.attention_to ?? "").trim(),
-        line1: prev.line1 || String(data?.address_line1 ?? "").trim(),
-        line2: prev.line2 || String(data?.address_line2 ?? "").trim(),
-        barangay: prev.barangay || String(data?.barangay ?? "").trim(),
-        city: prev.city || String(data?.city ?? "").trim(),
-        province: prev.province || String(data?.province ?? "").trim(),
-        postal_code: prev.postal_code || String(data?.postal_code ?? "").trim(),
-        country: prev.country || String(data?.country ?? "").trim() || "Philippines",
-        notes: prev.notes || String(data?.delivery_note ?? "").trim(),
+        full_name: prev.placed_for_someone_else ? prev.full_name : prev.full_name || fullName,
+        email: prev.placed_for_someone_else ? prev.email : prev.email || authEmail || "",
+        phone: prev.placed_for_someone_else
+          ? prev.phone
+          : prev.phone || String(data?.phone ?? "").trim() || authPhone || "",
+        attention_to: prev.placed_for_someone_else
+          ? prev.attention_to
+          : prev.attention_to || String(data?.attention_to ?? "").trim(),
+        line1: prev.placed_for_someone_else
+          ? prev.line1
+          : prev.line1 || String(data?.address_line1 ?? "").trim(),
+        line2: prev.placed_for_someone_else
+          ? prev.line2
+          : prev.line2 || String(data?.address_line2 ?? "").trim(),
+        barangay: prev.placed_for_someone_else
+          ? prev.barangay
+          : prev.barangay || String(data?.barangay ?? "").trim(),
+        city: prev.placed_for_someone_else
+          ? prev.city
+          : prev.city || String(data?.city ?? "").trim(),
+        province: prev.placed_for_someone_else
+          ? prev.province
+          : prev.province || String(data?.province ?? "").trim(),
+        postal_code: prev.placed_for_someone_else
+          ? prev.postal_code
+          : prev.postal_code || String(data?.postal_code ?? "").trim(),
+        country: prev.placed_for_someone_else
+          ? prev.country || "Philippines"
+          : prev.country || String(data?.country ?? "").trim() || "Philippines",
+        notes: prev.placed_for_someone_else
+          ? prev.notes
+          : prev.notes || String(data?.delivery_note ?? "").trim(),
       }));
     };
 
@@ -1737,19 +1809,37 @@ React.useEffect(() => {
     }
   }, [closePrimaryDrawers]);
 
-  const loadAndSelectOrder = React.useCallback(async (orderId: string) => {
-    setLoadingOrderDetail(true);
-    setSelectedOrderDetail(null);
-    try {
-      const detail = await fetchOrderDetail(orderId);
-      setSelectedOrderDetail(detail);
-    } catch (e) {
-      console.error("Failed to load order detail", e);
+  const loadAndSelectOrder = React.useCallback(
+    async (orderId: string, opts?: { retries?: number; delayMs?: number }) => {
+      const retries = Math.max(0, opts?.retries ?? 0);
+      const delayMs = Math.max(0, opts?.delayMs ?? 0);
+      setLoadingOrderDetail(true);
       setSelectedOrderDetail(null);
-    } finally {
-      setLoadingOrderDetail(false);
-    }
-  }, []);
+      try {
+        for (let attempt = 0; attempt <= retries; attempt += 1) {
+          try {
+            const detail = await fetchOrderDetail(orderId);
+            if (detail) {
+              setSelectedOrderDetail(detail);
+              return detail;
+            }
+          } catch (e) {
+            if (attempt >= retries) {
+              console.error("Failed to load order detail", e);
+            }
+          }
+          if (attempt < retries && delayMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+          }
+        }
+        setSelectedOrderDetail(null);
+        return null;
+      } finally {
+        setLoadingOrderDetail(false);
+      }
+    },
+    []
+  );
 
   const handleOrderStatusChange = React.useCallback(
     async (orderId: string, patch: OrderStatusPatch) => {
@@ -1846,6 +1936,76 @@ React.useEffect(() => {
       }
     },
     [loadAndSelectOrder, selectedOrderDetail?.id]
+  );
+
+  const handleOrderAdminFieldsChange = React.useCallback(
+    async (orderId: string, patch: OrderAdminPatch) => {
+      await updateOrderAdminFields(orderId, patch);
+      setMyOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? {
+                ...row,
+                full_name: patch.full_name ?? row.full_name,
+                email: patch.email ?? row.email,
+                phone: patch.phone ?? row.phone,
+                delivery_date: patch.delivery_date ?? row.delivery_date,
+              }
+            : row
+        )
+      );
+      setAllOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? {
+                ...row,
+                full_name: patch.full_name ?? row.full_name,
+                email: patch.email ?? row.email,
+                phone: patch.phone ?? row.phone,
+                delivery_date: patch.delivery_date ?? row.delivery_date,
+              }
+            : row
+        )
+      );
+      setSelectedOrderDetail((prev) =>
+        prev && prev.id === orderId
+          ? {
+              ...prev,
+              created_at: patch.created_at ?? prev.created_at,
+              full_name: patch.full_name ?? prev.full_name,
+              email: patch.email ?? prev.email,
+              phone: patch.phone ?? prev.phone,
+              address: patch.address ?? prev.address,
+              notes: patch.notes ?? prev.notes,
+              delivery_date: patch.delivery_date ?? prev.delivery_date,
+              delivery_slot: patch.delivery_slot ?? prev.delivery_slot,
+              express_delivery: patch.express_delivery ?? prev.express_delivery,
+              add_thermal_bag: patch.add_thermal_bag ?? prev.add_thermal_bag,
+              delivery_fee:
+                patch.delivery_fee === undefined ? prev.delivery_fee : Number(patch.delivery_fee),
+              total_selling_price:
+                patch.total_selling_price === undefined
+                  ? prev.total_selling_price
+                  : Number(patch.total_selling_price),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handleOrderDelete = React.useCallback(
+    async (orderId: string, paymentProofPath: string | null) => {
+      await deleteOrderByAdmin(orderId, { paymentProofPath });
+      setMyOrders((prev) => prev.filter((row) => row.id !== orderId));
+      setAllOrders((prev) => prev.filter((row) => row.id !== orderId));
+      setSelectedMyOrderId((prev) => (prev === orderId ? null : prev));
+      setSelectedAllOrderId((prev) => (prev === orderId ? null : prev));
+      setSelectedOrderDetail((prev) => (prev?.id === orderId ? null : prev));
+      setOrderDrawerSource(null);
+      setAllOrdersOpen(true);
+    },
+    []
   );
 
   const openMyOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
@@ -2157,6 +2317,25 @@ React.useEffect(() => {
     [closePrimaryDrawers, isAdmin, loadInventoryRows]
   );
 
+  const openAnalyticsDrawer = React.useCallback(
+    async (opts?: { skipNavigate?: boolean }) => {
+      if (!isAdmin) return;
+      closePrimaryDrawers();
+      setCartOpen(false);
+      try {
+        const rows = await fetchOrders({ all: true });
+        setAllOrders(rows);
+      } catch (e) {
+        console.error("Failed to load analytics orders", e);
+      }
+      setAnalyticsOpen(true);
+      if (!opts?.skipNavigate && typeof window !== "undefined") {
+        window.history.pushState({}, "", "/analytics");
+      }
+    },
+    [closePrimaryDrawers, isAdmin]
+  );
+
   const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     // Cart should never coexist with orders/all-orders drawers.
     closePrimaryDrawers();
@@ -2179,15 +2358,23 @@ React.useEffect(() => {
 
   const resolveRouteWithoutCart = React.useCallback(() => {
     if (panel === "checkout") return "/checkout";
-    if ((panel === "product" || panel === "edit") && selectedId) {
+    if (panel === "edit" && selectedId) {
+      const params = new URLSearchParams({ id: String(selectedId) });
+      return `/shop/product/edit?${params.toString()}`;
+    }
+    if (panel === "product" && selectedId) {
       const params = new URLSearchParams({ id: String(selectedId) });
       return `/shop/product?${params.toString()}`;
     }
     if (orderDrawerSource && selectedOrderDetail?.id) {
       const params = new URLSearchParams({ id: String(selectedOrderDetail.id) });
+      if (orderDrawerSource !== "public") {
+        params.set("source", orderDrawerSource);
+      }
       return `/order?${params.toString()}`;
     }
     if (inventoryOpen) return "/inventory";
+    if (analyticsOpen) return "/analytics";
     if (allOrdersOpen) return "/allorders";
     if (ordersOpen) return "/myorders";
     if (detailsOpen) return "/profile";
@@ -2195,6 +2382,7 @@ React.useEffect(() => {
     return "/shop";
   }, [
     adminAllProductsMode,
+    analyticsOpen,
     allOrdersOpen,
     detailsOpen,
     inventoryOpen,
@@ -2236,7 +2424,10 @@ React.useEffect(() => {
         const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
 
         const requireAuth = (next: { path: string; search: string }) => {
-          if (authUserId) return true;
+          if (authUserId) {
+            pendingRouteRef.current = null;
+            return true;
+          }
           pendingRouteRef.current = next;
           if (!authReady) return false;
           setAuthOpen(true);
@@ -2246,15 +2437,18 @@ React.useEffect(() => {
         };
 
         const requireAdmin = (next: { path: string; search: string }) => {
-          pendingRouteRef.current = next;
           if (!authReady) return false;
           if (!authUserId) {
+            pendingRouteRef.current = next;
             setAuthOpen(true);
             closePrimaryDrawers();
             setCartOpen(false);
             return false;
           }
-          if (isAdmin) return true;
+          if (isAdmin) {
+            pendingRouteRef.current = null;
+            return true;
+          }
           pendingRouteRef.current = null;
           closePrimaryDrawers();
           setCartOpen(false);
@@ -2277,6 +2471,16 @@ React.useEffect(() => {
           }
           return;
         }
+        if (path === "/shop/product/edit") {
+          const id = params.get("id") || params.get("product");
+          if (!id) {
+            openShop({ skipNavigate: true });
+            return;
+          }
+          if (!requireAdmin({ path, search })) return;
+          openEditProduct(id, { skipNavigate: true });
+          return;
+        }
         if (path === "/cart") {
           closePrimaryDrawers();
           openCart({ skipNavigate: true });
@@ -2288,11 +2492,18 @@ React.useEffect(() => {
         }
         if (path === "/order") {
           const id = params.get("id") || params.get("order");
+          const sourceParam = params.get("source");
           if (!id) {
             openShop({ skipNavigate: true });
             return;
           }
-          setOrderDrawerSource("public");
+          const nextSource =
+            sourceParam === "all" && isAdmin
+              ? "all"
+              : sourceParam === "my" && authUserId
+                ? "my"
+                : "public";
+          setOrderDrawerSource(nextSource);
           setOrdersOpen(false);
           setAllOrdersOpen(false);
           setPanel(null);
@@ -2325,6 +2536,11 @@ React.useEffect(() => {
           openShop({ skipNavigate: true });
           return;
         }
+        if (path === "/analytics") {
+          if (!requireAdmin({ path, search })) return;
+          void openAnalyticsDrawer({ skipNavigate: true });
+          return;
+        }
 
         openShop({ skipNavigate: true });
       } finally {
@@ -2344,6 +2560,7 @@ React.useEffect(() => {
       openMyOrdersDrawer,
       openProduct,
       openProfileDrawer,
+      openAnalyticsDrawer,
       openShop,
     ]
   );
@@ -2365,6 +2582,37 @@ React.useEffect(() => {
     applyRouteFromLocation(next.path, next.search);
   }, [applyRouteFromLocation, authReady, authUserId, isAdmin]);
 
+  React.useEffect(() => {
+    if (!orderPlacedModal || orderPlacedModal.summaryReady || orderPlacedModal.summaryTimedOut) return;
+    let cancelled = false;
+    const poll = async () => {
+      const startedAt = Date.now();
+      while (!cancelled) {
+        const detail = await loadAndSelectOrder(orderPlacedModal.orderId, { retries: 0, delayMs: 0 });
+        if (cancelled) return;
+        if (detail) {
+          setOrderPlacedModal((prev) =>
+            prev && prev.orderId === orderPlacedModal.orderId ? { ...prev, summaryReady: true } : prev
+          );
+          return;
+        }
+        if (Date.now() - startedAt >= 15000) {
+          setOrderPlacedModal((prev) =>
+            prev && prev.orderId === orderPlacedModal.orderId
+              ? { ...prev, summaryTimedOut: true }
+              : prev
+          );
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAndSelectOrder, orderPlacedModal]);
+
   const composeAddress = React.useCallback((draft: CustomerDraft) => {
     const d = draft as Record<string, unknown>;
     return [
@@ -2383,17 +2631,31 @@ React.useEffect(() => {
   }, []);
 
   const openOrderSummary = React.useCallback(
-    (orderId: string, opts?: { skipNavigate?: boolean }) => {
+    (
+      orderId: string,
+      opts?: {
+        skipNavigate?: boolean;
+        detail?: OrderDetail | null;
+        noticeText?: string;
+      }
+    ) => {
       closePrimaryDrawers();
       setPanel(null);
       setCartOpen(false);
       setOrderDrawerSource("public");
       setOrdersOpen(false);
       setAllOrdersOpen(false);
-      void loadAndSelectOrder(orderId);
+      setPublicOrderNotice(opts?.noticeText ?? "");
+      if (opts?.detail) {
+        setLoadingOrderDetail(false);
+        setSelectedOrderDetail(opts.detail);
+      } else {
+        void loadAndSelectOrder(orderId);
+      }
       if (!opts?.skipNavigate && typeof window !== "undefined") {
         const params = new URLSearchParams();
         params.set("id", orderId);
+        params.set("source", "public");
         window.history.pushState({}, "", `/order?${params.toString()}`);
       }
     },
@@ -2403,6 +2665,11 @@ React.useEffect(() => {
   const submitCheckout = React.useCallback(async (payload: CheckoutSubmitPayload) => {
     let activeSessionId = sessionIdRef.current;
     if (!activeSessionId || activeSessionId === "server") return;
+    if (submittingCheckout) return;
+
+    setSubmittingCheckout(true);
+
+    try {
 
     if (!paymentFile) {
       alert("Please upload your payment confirmation screenshot first.");
@@ -2421,11 +2688,21 @@ React.useEffect(() => {
     const ownerKey = user?.id ? `u-${user.id}` : `anon-${activeSessionId}`;
     const path = `${ownerKey}/${stamp}.${safeExt}`;
 
-    const { error: uploadError } = await supabase.storage
+    const uploadedA = await supabase.storage
       .from("payment-proofs")
-      .upload(path, paymentFile, { upsert: true });
+      .upload(path, paymentFile, { upsert: false });
+    let uploadError = uploadedA.error;
+    const shouldTryLegacyBucket =
+      !!uploadError && String(uploadError.message ?? "").toLowerCase().includes("bucket not found");
+    if (shouldTryLegacyBucket) {
+      const uploadedB = await supabase.storage
+        .from("payment_proofs")
+        .upload(path, paymentFile, { upsert: false });
+      uploadError = uploadedB.error;
+    }
     if (uploadError) {
-      alert(uploadError.message);
+      console.error("[checkout] payment proof upload failed", uploadError);
+      alert(`Payment proof upload failed: ${uploadError.message}`);
       return;
     }
 
@@ -2568,8 +2845,8 @@ React.useEffect(() => {
     }
 
     if (error) {
-      console.error(error);
-      alert(error.message);
+      console.error("[checkout] checkout RPC failed", error);
+      alert(`Checkout failed: ${error.message}`);
       return;
     }
 
@@ -2592,7 +2869,8 @@ React.useEffect(() => {
           status: "submitted",
           paid_status: "processed",
           delivery_status: "unpacked",
-          amount_paid: payload.total,
+          amount_paid: 0,
+          placed_for_someone_else: customer.placed_for_someone_else,
         })
         .eq("id", orderId);
       if (statusError) {
@@ -2614,6 +2892,7 @@ React.useEffect(() => {
       }
     }
 
+    let emailSent = false;
     if (orderId && customerEmail.trim()) {
       try {
         const origin =
@@ -2633,6 +2912,8 @@ React.useEffect(() => {
         if (!response.ok) {
           const details = await response.text();
           console.warn("[checkout] email failed:", details);
+        } else {
+          emailSent = true;
         }
       } catch (err) {
         console.warn("[checkout] email error:", err);
@@ -2682,12 +2963,19 @@ React.useEffect(() => {
       setOrderPlacedModal({
         orderId,
         orderNumber: resolvedOrderNumber || orderId.slice(0, 8).toUpperCase(),
+        emailSent,
+        summaryReady: true,
+        summaryTimedOut: false,
+        isPublic: !user?.id,
       });
     } else {
       scrollToProducts();
       alert("Your order has been placed successfully.");
     }
-  }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts]);
+    } finally {
+      setSubmittingCheckout(false);
+    }
+  }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts, submittingCheckout]);
 
   const selectedProductImages: ProductImage[] = React.useMemo(() => {
     if (!selectedId) return [];
@@ -2720,6 +3008,7 @@ React.useEffect(() => {
 
   const clearAllFilters = React.useCallback(() => {
     setSelectedFilters({
+      status: [],
       type: [],
       cut: [],
       country: [],
@@ -2853,6 +3142,7 @@ React.useEffect(() => {
           onOpenAllOrders={openAllOrdersDrawer}
           onOpenAllProducts={openAllProductsView}
           onOpenInventory={openInventoryDrawer}
+          onOpenAnalytics={openAnalyticsDrawer}
           onLogout={logout}
           navTone={navbarTone}
           zoneStyle={navbarDisplayStyle}
@@ -3129,8 +3419,14 @@ React.useEffect(() => {
                   </button>
                 ) : null}
                 <div style={styles.mobileFilterScrollArea}>
-                  {filterGroups.map((group) => (
-                    <div key={group.key} style={styles.filterGroup}>
+                  {filterGroups.map((group, index) => (
+                    <div
+                      key={group.key}
+                      style={{
+                        ...styles.filterGroup,
+                        ...(index === 0 ? styles.filterGroupFirst : null),
+                      }}
+                    >
                       <div style={styles.filterSubheader}>{group.label}</div>
                       <div style={styles.filterList}>
                         {filterOptionsByGroup[group.key].map((option) => (
@@ -3182,27 +3478,14 @@ React.useEffect(() => {
         product={selectedProduct}
         images={selectedProductImages}
         onClose={closeEditor}
-        onSaved={async () => {
-          await loadCatalog();
-          if (!selectedId) return;
-          try {
-            const refreshedImages = await fetchProductImages([selectedId]);
-            setProductImagesById((prev) => ({ ...prev, [selectedId]: refreshedImages }));
-            setProducts((prev) =>
-              prev.map((prod) => {
-                if (String(prod.id) !== String(selectedId)) return prod;
-                const images = refreshedImages
-                  .slice()
-                  .sort((a, b) => a.sort_order - b.sort_order);
-                const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
-                const firstImage = images[0]?.url ?? null;
-                const ownThumb = prod.thumbnail_url?.trim() || null;
-                return { ...prod, thumbnail_url: ownThumb ?? orderOne ?? firstImage };
-              })
-            );
-          } catch (e) {
-            console.error("[page] refresh product images failed", e);
-          }
+        onSaved={async ({ product: nextProduct, images: nextImages }) => {
+          setProducts((prev) =>
+            prev.map((prod) => (String(prod.id) === String(nextProduct.id) ? nextProduct : prod))
+          );
+          setProductImagesById((prev) => ({
+            ...prev,
+            [String(nextProduct.id)]: nextImages,
+          }));
         }}
         onDeleted={async () => {
           await loadCatalog();
@@ -3220,6 +3503,7 @@ React.useEffect(() => {
         total={subtotal}
         customer={customer as CustomerDraft}
         setCustomer={handleSetCustomer}
+        isAdmin={isAdmin}
         isLoggedIn={!!authUserId}
         createAccountFromDetails={createAccountFromDetails}
         setCreateAccountFromDetails={setCreateAccountFromDetails}
@@ -3233,6 +3517,7 @@ React.useEffect(() => {
         gcashPhone={checkoutPaymentDraft.gcash_phone}
         onBack={backToList}
         onSubmit={handleCheckoutSubmit as (payload: CheckoutSubmitPayload) => void}
+        submitting={submittingCheckout}
         onOpenProfile={openProfileDrawer}
         onAddItem={addToCart}
         onRemoveItem={removeFromCart}
@@ -3277,6 +3562,10 @@ React.useEffect(() => {
           setSelectedMyOrderId(id);
           setOrderDrawerSource("my");
           setOrdersOpen(false);
+          if (typeof window !== "undefined") {
+            const params = new URLSearchParams({ id, source: "my" });
+            window.history.pushState({}, "", `/order?${params.toString()}`);
+          }
           void loadAndSelectOrder(id);
         }}
         onClose={() => {
@@ -3297,6 +3586,10 @@ React.useEffect(() => {
           setSelectedAllOrderId(id);
           setOrderDrawerSource("all");
           setAllOrdersOpen(false);
+          if (typeof window !== "undefined") {
+            const params = new URLSearchParams({ id, source: "all" });
+            window.history.pushState({}, "", `/order?${params.toString()}`);
+          }
           void loadAndSelectOrder(id);
         }}
         onClose={() => {
@@ -3320,8 +3613,18 @@ React.useEffect(() => {
         }}
       />
 
+      <AnalyticsDrawer
+        isOpen={analyticsOpen}
+        topOffset={topOffset}
+        orders={allOrders}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => {
+          openShop();
+        }}
+      />
+
       <OrderDrawer
-        isOpen={!!orderDrawerSource && !!selectedOrderDetail}
+        isOpen={!!orderDrawerSource && (loadingOrderDetail || !!selectedOrderDetail)}
         topOffset={topOffset}
         detail={selectedOrderDetail}
         products={products}
@@ -3332,8 +3635,12 @@ React.useEffect(() => {
         onAddLines={handleOrderAddLines}
         onChangeAmountPaid={handleOrderAmountPaidChange}
         onChangePaymentProof={handleOrderPaymentProofChange}
+        onChangeAdminFields={handleOrderAdminFieldsChange}
+        onDeleteOrder={handleOrderDelete}
+        noticeText={orderDrawerSource === "public" ? publicOrderNotice : ""}
         onBack={() => {
           const source = orderDrawerSource;
+          setPublicOrderNotice("");
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
           if (source === "public") {
@@ -3342,34 +3649,60 @@ React.useEffect(() => {
           }
           if (source === "my") {
             setOrdersOpen(true);
+            if (typeof window !== "undefined") {
+              window.history.pushState({}, "", "/myorders");
+            }
             return;
           }
           if (source === "all") {
             setAllOrdersOpen(true);
+            if (typeof window !== "undefined") {
+              window.history.pushState({}, "", "/allorders");
+            }
           }
         }}
       />
 
-      {orderPlacedModal ? (
+      {submittingCheckout || orderPlacedModal ? (
         <div style={styles.orderPlacedBackdrop}>
-          <div style={styles.orderPlacedModal}>
-            <div style={styles.orderPlacedTitle}>
-              Your order number {orderPlacedModal.orderNumber} has been placed successfully.
-            </div>
-            <div style={styles.orderPlacedText}>
-              You will be redirected to your order summary now.
-            </div>
-            <button
-              type="button"
-              style={styles.orderPlacedOkBtn}
-              onClick={() => {
-                const orderId = orderPlacedModal.orderId;
-                setOrderPlacedModal(null);
-                openOrderSummary(orderId);
-              }}
-            >
-              OK
-            </button>
+          <div style={{ ...styles.orderPlacedModal, ...(mainZoneStyle ?? null) }}>
+            {!orderPlacedModal ? (
+              <>
+                <div style={styles.orderPlacedTitle}>Ordering in progress...</div>
+                <div style={styles.orderPlacedText}>Do not close this window.</div>
+              </>
+            ) : (
+              <>
+                <div style={styles.orderPlacedTitle}>
+                  Your order number {orderPlacedModal.orderNumber} has been placed successfully.
+                </div>
+                <div style={styles.orderPlacedText}>
+                  {orderPlacedModal.emailSent
+                    ? orderPlacedModal.isPublic
+                      ? "Your order has been sent to your email with a link to open this order summary and track its status."
+                      : "Your order has been sent to your email."
+                    : orderPlacedModal.isPublic
+                      ? "Use the OK button below to open your order summary and track its status."
+                      : "Use the OK button below to open your order summary."}
+                </div>
+                {orderPlacedModal.summaryReady || orderPlacedModal.summaryTimedOut ? (
+                  <button
+                    type="button"
+                    style={styles.orderPlacedOkBtn}
+                    onClick={() => {
+                      const orderId = orderPlacedModal.orderId;
+                      const noticeText = orderPlacedModal.emailSent
+                        ? "Your order has been sent to your email with a link to open this order summary and track its status."
+                        : "Your order has been placed. Use this order summary to track its status.";
+                      setOrderPlacedModal(null);
+                      void openOrderSummary(orderId, { noticeText });
+                    }}
+                  >
+                    OK
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -3658,8 +3991,9 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 1,
   },
   createBtn: {
-    height: 34,
-    borderRadius: 8,
+    height: 42,
+    minHeight: 42,
+    borderRadius: 12,
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
@@ -3668,8 +4002,14 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 1,
     padding: "0 15px",
     cursor: "pointer",
-    marginBottom: 10,
+    marginBottom: 20,
     width: "100%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
+    boxSizing: "border-box",
+    appearance: "none",
   },
   mobileFilterFab: {
     position: "fixed",
@@ -3746,7 +4086,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: "auto",
     overscrollBehaviorY: "contain",
     paddingRight: 2,
-    marginTop: 30,
+    marginTop: 8,
   },
   mobileFilterCloseBtn: {
     marginTop: 4,
@@ -3883,16 +4223,19 @@ const styles: Record<string, React.CSSProperties> = {
   },
   orderPlacedModal: {
     width: "min(560px, 92vw)",
+    minHeight: 300,
     borderRadius: 12,
     border: "1px solid var(--tp-border-color)",
-    background: "rgba(10,10,10,0.88)",
+    background: "var(--tp-page-bg)",
     padding: 18,
     color: "var(--tp-text-color)",
     display: "grid",
-    gap: 10,
+    alignContent: "center",
+    gap: 18,
+    textAlign: "center",
   },
   orderPlacedTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 800,
     lineHeight: 1.35,
   },
@@ -3904,7 +4247,7 @@ const styles: Record<string, React.CSSProperties> = {
   orderPlacedOkBtn: {
     width: 92,
     height: 36,
-    justifySelf: "end",
+    justifySelf: "center",
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",

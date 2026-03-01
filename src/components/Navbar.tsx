@@ -11,6 +11,7 @@ import {
 const NAV_CONTROL_H = 36;
 const NAV_SECTION_GAP = 12;
 const NAV_INLINE_GAP = 10;
+const NAV_AUTH_DESKTOP_OFFSET = 14;
 
 type Props = {
   search: string;
@@ -31,6 +32,7 @@ type Props = {
   onOpenAllOrders: () => void;
   onOpenAllProducts: () => void;
   onOpenInventory: () => void;
+  onOpenAnalytics: () => void;
   onLogout: () => void;
   navTone?: "dark-bg" | "light-bg";
   zoneStyle?: React.CSSProperties;
@@ -60,6 +62,7 @@ export default function Navbar({
   onOpenAllOrders,
   onOpenAllProducts,
   onOpenInventory,
+  onOpenAnalytics,
   onLogout,
   navTone = "light-bg",
   zoneStyle,
@@ -146,7 +149,13 @@ export default function Navbar({
           </AppButton>
 
           {authLabel ? (
-            <div ref={authWrapRef} style={styles.authWrap}>
+            <div
+              ref={authWrapRef}
+              style={{
+                ...styles.authWrap,
+                ...(!isMobile ? { marginLeft: NAV_AUTH_DESKTOP_OFFSET } : null),
+              }}
+            >
               <button
                 type="button"
                 style={{
@@ -242,6 +251,17 @@ export default function Navbar({
                       >
                         Inventory
                       </button>
+
+                      <button
+                        type="button"
+                        style={styles.menuItem}
+                        onClick={() => {
+                          setAuthMenuOpen(false);
+                          onOpenAnalytics();
+                        }}
+                      >
+                        Analytics
+                      </button>
                     </>
                   )}
 
@@ -261,7 +281,11 @@ export default function Navbar({
           ) : (
             <AppButton
               variant="nav"
-              style={{ ...styles.navBtn, ...(isMobile ? styles.navBtnMobile : null) }}
+              style={{
+                ...styles.navBtn,
+                ...(isMobile ? styles.navBtnMobile : null),
+                ...(!isMobile ? { marginLeft: NAV_AUTH_DESKTOP_OFFSET } : null),
+              }}
               onClick={onOpenAuth}
             >
               Login

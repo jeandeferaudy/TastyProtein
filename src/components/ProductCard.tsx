@@ -778,7 +778,7 @@ const styles: Record<string, React.CSSProperties> = {
   oosZone: {
     margin: 10,
     marginTop: 8,
-    height: 40,
+    height: 44,
     borderRadius: 10,
     border: "1px solid rgba(255,255,255,0.2)",
     background: "rgba(160,160,160,0.25)",

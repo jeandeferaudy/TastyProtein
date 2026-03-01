@@ -6,6 +6,8 @@ export type DbProduct = {
   name: string | null;
   long_name: string | null;
   description?: string | null;
+  callout_text?: string | null;
+  love_points?: string | null;
   type?: string | null;
   cut?: string | null;
   preparation?: string | null;
@@ -58,6 +60,8 @@ export async function fetchProducts(options?: {
       name: (r["name"] as string | null) ?? null,
       long_name: (r["long_name"] as string | null) ?? null,
       description: (r["description"] as string | null) ?? null,
+      callout_text: (r["callout_text"] as string | null) ?? null,
+      love_points: (r["love_points"] as string | null) ?? null,
       type: (r["type"] as string | null) ?? null,
       cut: (r["cut"] as string | null) ?? null,
       preparation:

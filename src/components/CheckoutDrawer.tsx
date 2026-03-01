@@ -4,7 +4,7 @@
 import React, { useMemo } from "react";
 import type { Order } from "@/types/order";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
-import { AppButton, TOPBAR_FONT_SIZE, UI } from "@/components/ui";
+import { AppButton, RemoveIcon, TOPBAR_FONT_SIZE, UI } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 import { supabase } from "@/lib/supabase";
 
@@ -113,6 +113,7 @@ type Props = {
   // controlled form state
   customer: CustomerDraft;
   setCustomer: (next: CustomerDraft) => void;
+  isAdmin?: boolean;
   isLoggedIn?: boolean;
   createAccountFromDetails?: boolean;
   setCreateAccountFromDetails?: (next: boolean) => void;
@@ -133,6 +134,7 @@ type Props = {
   // actions
   onBack: () => void;
   onSubmit: (payload: CheckoutSubmitPayload) => void;
+  submitting?: boolean;
   onOpenProfile?: () => void;
   onAddItem?: (id: string) => void;
   onRemoveItem?: (id: string) => void;
@@ -150,6 +152,7 @@ export default function CheckoutDrawer({
   checkoutState,
   customer,
   setCustomer,
+  isAdmin = false,
   isLoggedIn = false,
   createAccountFromDetails = false,
   setCreateAccountFromDetails,
@@ -163,6 +166,7 @@ export default function CheckoutDrawer({
   gcashPhone = "",
   onBack,
   onSubmit,
+  submitting = false,
   onOpenProfile,
   onAddItem,
   onRemoveItem,
@@ -328,7 +332,11 @@ export default function CheckoutDrawer({
 
   React.useEffect(() => {
     if (!isOpen) return;
-    const next = isLoggedIn && hasProfileAddress;
+    if (customer.placed_for_someone_else) {
+      setUseProfileAddress(false);
+      return;
+    }
+    const next = isLoggedIn && hasProfileAddress && !customer.placed_for_someone_else;
     setUseProfileAddress(next);
     if (next && profileAddress) {
       setCustomer({
@@ -344,7 +352,7 @@ export default function CheckoutDrawer({
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, isLoggedIn, hasProfileAddress, profileAddress]);
+  }, [isOpen, isLoggedIn, hasProfileAddress, profileAddress, customer.placed_for_someone_else]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -418,16 +426,29 @@ export default function CheckoutDrawer({
   const grandTotal = computedTotal + deliveryFee + referBagFee;
   const displayedTotal = checkoutStep === 1 ? computedTotal : grandTotal;
   const hasOutOfStockItems = summaryLines.some((li: any) => Boolean(li?.outOfStock));
+  const isOnBehalfMode = Boolean(isAdmin && customer.placed_for_someone_else);
+  const requiresDirectContactDetails = !isOnBehalfMode;
+  const hasValidEmail =
+    customer.email.trim().length === 0
+      ? false
+      : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim());
+  const hasValidPhone = customer.phone.trim().length > 0;
+  const hasRecipientName = customer.full_name.trim().length > 0;
+  const hasRecipientLine1 = customer.line1.trim().length > 0;
+  const hasRecipientBarangay = customer.barangay.trim().length > 0;
+  const hasRecipientCity = customer.city.trim().length > 0;
+  const hasRecipientProvince = customer.province.trim().length > 0;
+  const hasRecipientPostalCode = customer.postal_code.trim().length > 0;
 
   const isCheckoutValid =
-    customer.full_name.trim().length > 1 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
-    customer.phone.trim().length >= 7 &&
-    customer.line1.trim().length > 3 &&
-    customer.barangay.trim().length > 1 &&
-    customer.city.trim().length > 1 &&
-    customer.province.trim().length > 1 &&
-    customer.postal_code.trim().length > 2 &&
+    hasRecipientName &&
+    (!requiresDirectContactDetails || hasValidEmail) &&
+    (!requiresDirectContactDetails || hasValidPhone) &&
+    hasRecipientLine1 &&
+    hasRecipientBarangay &&
+    hasRecipientCity &&
+    hasRecipientProvince &&
+    hasRecipientPostalCode &&
     postalSupported &&
     customer.delivery_date.trim().length > 0 &&
     customer.delivery_slot.trim().length > 0 &&
@@ -442,17 +463,17 @@ export default function CheckoutDrawer({
   }, [isOpen]);
 
   const missingCustomer: string[] = [];
-  if (customer.full_name.trim().length <= 1) missingCustomer.push("full name");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim())) {
+  if (!hasRecipientName) missingCustomer.push("full name");
+  if (requiresDirectContactDetails && !hasValidEmail) {
     missingCustomer.push("valid email");
   }
-  if (customer.phone.trim().length < 7) missingCustomer.push("phone");
-  if (customer.line1.trim().length <= 3) missingCustomer.push("line 1");
-  if (customer.barangay.trim().length <= 1) missingCustomer.push("barangay");
-  if (customer.city.trim().length <= 1) missingCustomer.push("city");
-  if (customer.province.trim().length <= 1) missingCustomer.push("province");
-  if (customer.postal_code.trim().length <= 2) missingCustomer.push("postal code");
-  if (customer.postal_code.trim().length > 2 && !postalSupported) {
+  if (requiresDirectContactDetails && !hasValidPhone) missingCustomer.push("phone");
+  if (!hasRecipientLine1) missingCustomer.push("line 1");
+  if (!hasRecipientBarangay) missingCustomer.push("barangay");
+  if (!hasRecipientCity) missingCustomer.push("city");
+  if (!hasRecipientProvince) missingCustomer.push("province");
+  if (!hasRecipientPostalCode) missingCustomer.push("postal code");
+  if (hasRecipientPostalCode && !postalSupported) {
     missingCustomer.push("supported delivery postal code");
   }
   if (!customer.delivery_date.trim()) missingCustomer.push("delivery date");
@@ -557,14 +578,14 @@ export default function CheckoutDrawer({
 
   const isSummaryComplete = summaryLines.length > 0;
   const isCustomerComplete =
-    customer.full_name.trim().length > 1 &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email.trim()) &&
-    customer.phone.trim().length >= 7 &&
-    customer.line1.trim().length > 3 &&
-    customer.barangay.trim().length > 1 &&
-    customer.city.trim().length > 1 &&
-    customer.province.trim().length > 1 &&
-    customer.postal_code.trim().length > 2 &&
+    hasRecipientName &&
+    (!requiresDirectContactDetails || hasValidEmail) &&
+    (!requiresDirectContactDetails || hasValidPhone) &&
+    hasRecipientLine1 &&
+    hasRecipientBarangay &&
+    hasRecipientCity &&
+    hasRecipientProvince &&
+    hasRecipientPostalCode &&
     postalSupported;
   const isDeliveryComplete =
     customer.delivery_date.trim().length > 0 &&
@@ -806,14 +827,7 @@ export default function CheckoutDrawer({
                   aria-label="Remove uploaded file"
                   title="Remove file"
                 >
-                  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                    <path
-                      d="M6 6l12 12M18 6L6 18"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
+                  <RemoveIcon size={14} />
                 </button>
               ) : null}
             </div>
@@ -1239,6 +1253,44 @@ export default function CheckoutDrawer({
                     ...(checkoutStep > 1 ? styles.detailsSectionBoxOffset : null),
                   }}
                 >
+                {isAdmin ? (
+                  <label style={{ ...styles.optInRow, marginBottom: 12 }}>
+                    <input
+                      type="checkbox"
+                      style={styles.checkoutCheckbox}
+                      checked={customer.placed_for_someone_else}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        if (checked) {
+                          setUseProfileAddress(false);
+                          setCustomer({
+                            ...customer,
+                            placed_for_someone_else: true,
+                            full_name: "",
+                            email: "",
+                            phone: "",
+                            attention_to: "",
+                            line1: "",
+                            line2: "",
+                            barangay: "",
+                            city: "",
+                            province: "",
+                            postal_code: "",
+                            country: "Philippines",
+                            notes: "",
+                          });
+                          return;
+                        }
+                        setCustomer({
+                          ...customer,
+                          placed_for_someone_else: false,
+                        });
+                      }}
+                    />
+                    <span>Placed on behalf of someone else</span>
+                  </label>
+                ) : null}
+
 	                <div style={{ ...fieldRowStyle, ...styles.firstFieldRow }}>
 	                  <label style={fieldLabelStyle}>
 	                    Full name<span style={styles.req}>*</span>
@@ -1255,7 +1307,8 @@ export default function CheckoutDrawer({
 
                 <div style={fieldRowStyle}>
                   <label style={fieldLabelStyle}>
-                    Email<span style={styles.req}>*</span>
+                    Email
+                    {requiresDirectContactDetails ? <span style={styles.req}>*</span> : null}
                   </label>
                   <input
                     style={styles.input}
@@ -1267,7 +1320,8 @@ export default function CheckoutDrawer({
 
                 <div style={fieldRowStyle}>
                   <label style={fieldLabelStyle}>
-                    Mobile number<span style={styles.req}>*</span>
+                    Mobile number
+                    {requiresDirectContactDetails ? <span style={styles.req}>*</span> : null}
                   </label>
                   <input
                     style={styles.input}
@@ -1282,11 +1336,17 @@ export default function CheckoutDrawer({
                     <label style={{ ...fieldLabelStyle, ...styles.deliveryAddressLabel }}>
                       Delivery address
                     </label>
-	                    <label style={styles.profileAddressRow}>
+	                    <label
+                        style={{
+                          ...styles.profileAddressRow,
+                          ...(customer.placed_for_someone_else ? { opacity: 0.45, pointerEvents: "none" } : null),
+                        }}
+                      >
 	                      <input
 	                        type="checkbox"
 	                        style={styles.checkoutCheckbox}
-	                        checked={useProfileAddress}
+	                        checked={!customer.placed_for_someone_else && useProfileAddress}
+                          disabled={customer.placed_for_someone_else}
 	                        onChange={(e) => {
                           const checked = e.target.checked;
                           setUseProfileAddress(checked);
@@ -1332,7 +1392,7 @@ export default function CheckoutDrawer({
                 ) : null}
 
                 <div style={fieldRowStyle}>
-                  <label style={fieldLabelStyle} aria-hidden="true" />
+                  <label style={fieldLabelStyle}>Address</label>
                   <div>
                     <input
                       style={styles.input}
@@ -1725,15 +1785,17 @@ export default function CheckoutDrawer({
 	                {checkoutStep === 4 ? (
                   <>
                     <div style={styles.reqHint}>{confirmHint}</div>
-                    <AppButton
-                      style={{
-                        ...styles.sendBtn,
-                        opacity: isCheckoutValid ? 1 : 0.4,
-                      }}
-                      onClick={() => {
-                        markStepAttempted(4);
-                        if (!isCheckoutValid) return;
-                        onSubmit({
+	                    <AppButton
+                        disabled={submitting}
+	                      style={{
+	                        ...styles.sendBtn,
+	                        opacity: submitting ? 1 : isCheckoutValid ? 1 : 0.4,
+	                      }}
+	                      onClick={() => {
+                          if (submitting) return;
+	                        markStepAttempted(4);
+	                        if (!isCheckoutValid) return;
+	                        onSubmit({
                           subtotal: computedTotal,
                           delivery_fee: deliveryFee,
                           thermal_bag_fee: referBagFee,
@@ -1742,12 +1804,12 @@ export default function CheckoutDrawer({
                           delivery_date: customer.delivery_date,
                           delivery_slot: customer.delivery_slot,
                           express_delivery: customer.express_delivery,
-                          add_thermal_bag: customer.add_refer_bag,
-                        });
-                      }}
-                    >
-                      Send Order
-                    </AppButton>
+	                          add_thermal_bag: customer.add_refer_bag,
+	                        });
+	                      }}
+	                    >
+	                      {submitting ? <span style={styles.sendBtnSpinner} aria-hidden="true" /> : "Send Order"}
+	                    </AppButton>
                   </>
                 ) : null}
               </div>
@@ -2249,9 +2311,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 34,
     height: 34,
     borderRadius: 8,
-    border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg-soft)",
-    color: "var(--tp-text-color)",
+    border: "1px solid rgba(214,74,74,0.46)",
+    background: "rgba(214,74,74,0.14)",
+    color: "#ff6b6b",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2278,6 +2340,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     letterSpacing: 1,
     textTransform: "uppercase",
+  },
+  sendBtnSpinner: {
+    width: 16,
+    height: 16,
+    borderRadius: "50%",
+    border: "2px solid rgba(0,0,0,0.24)",
+    borderTopColor: "rgba(0,0,0,0.92)",
+    animation: "tp-spin 0.8s linear infinite",
   },
   backStepBtn: {
     marginTop: 20,
@@ -2728,6 +2798,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "var(--tp-text-color)",
     textAlign: "center",
     display: "inline-flex",
+    gap: 4,
     alignItems: "center",
     justifyContent: "center",
     width: "100%",

@@ -8,6 +8,10 @@ import {
 } from "@/components/ui";
 import type { OrderListItem } from "@/lib/ordersApi";
 
+const BACK_BTN_W = 68;
+const TITLE_GAP = 40;
+const STATUS_COL_W = 148;
+
 export type MyOrderItem = OrderListItem;
 
 type Props = {
@@ -37,6 +41,10 @@ function orderNumber8(id: string) {
   return (digits.slice(-8) || "00000000").padStart(8, "0");
 }
 
+function fmtPickedOrdered(picked: number, ordered: number) {
+  return `${Math.max(0, Number(picked) || 0)} / ${Math.max(0, Number(ordered) || 0)}`;
+}
+
 function statusTone(value: string): React.CSSProperties {
   const v = String(value || "").toLowerCase();
   if (v === "completed" || v === "paid" || v === "delivered" || v === "confirmed") {
@@ -49,6 +57,14 @@ function statusTone(value: string): React.CSSProperties {
     return { color: "#c38a28", borderColor: "rgba(255,207,122,0.76)", background: "rgba(255,207,122,0.26)" };
   }
   return { color: "var(--tp-text-color)", borderColor: "rgba(255,255,255,0.24)", background: "var(--tp-control-bg-soft)" };
+}
+
+function paymentAmountTone(amountPaid: number | null | undefined, total: number): React.CSSProperties {
+  const paid = Number(amountPaid ?? 0);
+  const due = paid - Number(total || 0);
+  if (due === 0) return { color: "#67bf8a" };
+  if (due < 0) return { color: "#de6464" };
+  return { color: "#66c7ff" };
 }
 
 export default function MyOrdersDrawer({
@@ -173,7 +189,14 @@ export default function MyOrdersDrawer({
                 >
                   <div style={styles.mobileCardTop}>
                     <div style={styles.mobileOrderNo}>#{o.order_number ?? orderNumber8(o.id)}</div>
-                    <div style={styles.mobileTotal}>₱ {fmtMoney(o.total_selling_price)}</div>
+                    <div
+                      style={{
+                        ...styles.mobileTotal,
+                        ...paymentAmountTone(o.amount_paid, o.total_selling_price),
+                      }}
+                    >
+                      ₱ {fmtMoney(o.total_selling_price)}
+                    </div>
                   </div>
                   <div style={styles.mobileMetaRow}>
                     <span>Order: {fmtDate(o.created_at)}</span>
@@ -181,7 +204,7 @@ export default function MyOrdersDrawer({
                   </div>
                   <div style={styles.mobileMetaRow}>
                     <span style={styles.customerCell}>{o.full_name || "—"}</span>
-                    <span>{o.total_qty} item(s)</span>
+                    <span>{fmtPickedOrdered(o.packed_qty_total, o.total_qty)}</span>
                   </div>
                   <div style={styles.mobilePillsRow}>
                     <span style={{ ...styles.rowStatusPill, ...styles.rowStatusPillMobile, ...statusTone(o.status) }}>
@@ -209,8 +232,10 @@ export default function MyOrdersDrawer({
                   <div>{fmtDate(o.created_at)}</div>
                   <div>{o.delivery_date ? fmtDate(o.delivery_date) : "—"}</div>
                   <div style={styles.customerCell}>{o.full_name || "—"}</div>
-                  <div>{o.total_qty}</div>
-                  <div>₱ {fmtMoney(o.total_selling_price)}</div>
+                  <div>{fmtPickedOrdered(o.packed_qty_total, o.total_qty)}</div>
+                  <div style={paymentAmountTone(o.amount_paid, o.total_selling_price)}>
+                    ₱ {fmtMoney(o.total_selling_price)}
+                  </div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.status) }}>{o.status}</span></div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.paid_status) }}>{o.paid_status}</span></div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.delivery_status) }}>{o.delivery_status}</span></div>
@@ -244,7 +269,12 @@ const styles: Record<string, React.CSSProperties> = {
   backBtnMobile: { fontSize: TOPBAR_FONT_SIZE_MOBILE, height: 40, padding: "0 15px 0 0" },
   title: { fontSize: TOPBAR_FONT_SIZE, fontWeight: 900, letterSpacing: 2, color: "var(--tp-text-color)" },
   titleMobile: { fontSize: TOPBAR_FONT_SIZE_MOBILE, fontWeight: 700, letterSpacing: 0.2 },
-  content: { flex: 1, overflowY: "auto", padding: "6px 24px 48px", color: "var(--tp-text-color)" },
+  content: {
+    flex: 1,
+    overflowY: "auto",
+    padding: `6px 24px 48px ${BACK_BTN_W + TITLE_GAP}px`,
+    color: "var(--tp-text-color)",
+  },
   contentMobile: { padding: "8px 12px 20px" },
   searchWrap: {
     marginBottom: 10,
@@ -262,7 +292,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   listHead: {
     display: "grid",
-    gridTemplateColumns: "100px 106px 116px minmax(140px, 1fr) 60px 96px 102px 102px 112px",
+    gridTemplateColumns: `100px 106px 116px minmax(140px, 1fr) 60px 96px ${STATUS_COL_W}px ${STATUS_COL_W}px ${STATUS_COL_W}px`,
     gap: 8,
     fontSize: 15,
     opacity: 0.72,
@@ -273,7 +303,7 @@ const styles: Record<string, React.CSSProperties> = {
   listRow: {
     width: "100%",
     display: "grid",
-    gridTemplateColumns: "100px 106px 116px minmax(140px, 1fr) 60px 96px 102px 102px 112px",
+    gridTemplateColumns: `100px 106px 116px minmax(140px, 1fr) 60px 96px ${STATUS_COL_W}px ${STATUS_COL_W}px ${STATUS_COL_W}px`,
     gap: 8,
     padding: "10px 10px",
     border: "none",
@@ -290,7 +320,7 @@ const styles: Record<string, React.CSSProperties> = {
   customerCell: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.92 },
   rowStatusPill: {
     height: 30,
-    minWidth: 92,
+    width: "100%",
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
     display: "inline-flex",

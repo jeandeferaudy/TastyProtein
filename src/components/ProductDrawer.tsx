@@ -35,6 +35,13 @@ function formatSize(p: Product) {
   return p.size?.trim() || formatSizeG(p.size_g) || "";
 }
 
+function splitLovePoints(value: string | null | undefined) {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s\-*•]+/, "").trim())
+    .filter(Boolean);
+}
+
 export default function ProductDrawer({
   isOpen,
   topOffset,
@@ -84,6 +91,7 @@ export default function ProductDrawer({
   const qtyBtnStyle = isMobileViewport ? styles.qtyBtn : styles.qtyBtnDesktop;
   const qtyTextStyle = isMobileViewport ? styles.qty : styles.qtyDesktop;
   const productTitle = product?.long_name || product?.name || "Product";
+  const lovePoints = React.useMemo(() => splitLovePoints(product?.love_points), [product?.love_points]);
   const activeImageIndex = React.useMemo(() => {
     if (!orderedImages.length) return -1;
     const idx = orderedImages.findIndex((img) => img.url === activeImageUrl);
@@ -184,11 +192,18 @@ export default function ProductDrawer({
       </div>
     </div>
   );
-  const detailsSection = (
+  const topDetailsSection = (
     <>
       {!isMobileViewport ? (
         <div style={styles.drawerName}>{productTitle}</div>
       ) : null}
+
+      {product.callout_text ? (
+        <div style={styles.detailBlockTight}>
+          <div style={styles.drawerCallout}>{product.callout_text}</div>
+        </div>
+      ) : null}
+
       <div style={styles.drawerDetailStack}>
         {product.cut ? (
           <div style={detailRowStyle}>
@@ -205,37 +220,18 @@ export default function ProductDrawer({
         ) : null}
       </div>
 
-      {(product.preparation || product.temperature || product.packaging) ? (
+      {lovePoints.length > 0 ? (
         <div style={styles.detailBlock}>
-          {product.preparation ? (
-            <div style={detailRowStyle}>
-              <div style={styles.detailLabel}>Preparation</div>
-              <div style={styles.detailValue}>{product.preparation}</div>
-            </div>
-          ) : null}
-          {product.temperature ? (
-            <div style={detailRowStyle}>
-              <div style={styles.detailLabel}>Temperature</div>
-              <div style={styles.detailValue}>{product.temperature}</div>
-            </div>
-          ) : null}
-          {product.packaging ? (
-            <div style={detailRowStyle}>
-              <div style={styles.detailLabel}>Packaging</div>
-              <div style={styles.detailValue}>{product.packaging}</div>
-            </div>
-          ) : null}
+          <div style={styles.detailLabel}>Why People Love It</div>
+          <ul style={styles.loveList}>
+            {lovePoints.map((point, index) => (
+              <li key={`${index}-${point}`} style={styles.loveItem}>
+                {point}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
-
-      <div style={styles.detailBlock}>
-        <div style={styles.detailLabel}>Description</div>
-        {product.description ? (
-          <div style={styles.drawerDesc}>{product.description}</div>
-        ) : (
-          <div style={styles.drawerDescMuted}>No description yet.</div>
-        )}
-      </div>
 
       {!isMobileViewport ? (
         <div style={purchaseRowStyle}>
@@ -267,6 +263,42 @@ export default function ProductDrawer({
               <QtyIcon type="plus" />
             </AppButton>
           </div>
+        </div>
+      ) : null}
+    </>
+  );
+
+  const lowerDetailsSection = (
+    <>
+      <div style={styles.detailBlockWide}>
+        <div style={styles.detailLabel}>Description</div>
+        {product.description ? (
+          <div style={styles.drawerDesc}>{product.description}</div>
+        ) : (
+          <div style={styles.drawerDescMuted}>No description yet.</div>
+        )}
+      </div>
+
+      {(product.preparation || product.temperature || product.packaging) ? (
+        <div style={styles.detailBlockWide}>
+          {product.preparation ? (
+            <div style={detailRowStyle}>
+              <div style={styles.detailLabel}>Preparation</div>
+              <div style={styles.detailValue}>{product.preparation}</div>
+            </div>
+          ) : null}
+          {product.temperature ? (
+            <div style={detailRowStyle}>
+              <div style={styles.detailLabel}>Temperature</div>
+              <div style={styles.detailValue}>{product.temperature}</div>
+            </div>
+          ) : null}
+          {product.packaging ? (
+            <div style={detailRowStyle}>
+              <div style={styles.detailLabel}>Packaging</div>
+              <div style={styles.detailValue}>{product.packaging}</div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </>
@@ -307,65 +339,96 @@ export default function ProductDrawer({
         aria-hidden={!isOpen}
       >
         <div style={styles.productPanelInner}>
-          <div
-            style={{
-              ...styles.productTopBand,
-              ...(isMobileViewport ? styles.productTopBandMobile : null),
-              ...(!isMobileViewport ? styles.productTopBandDesktopOverlay : null),
-            }}
-          >
-            <AppButton type="button" variant="ghost" style={styles.drawerBackBtnTop} onClick={onBack}>
-              BACK
-            </AppButton>
-            {isMobileViewport ? <div style={styles.topTitle}>{productTitle}</div> : null}
-            <div style={styles.topSpacer} />
-            {canEdit && onEdit && productId ? (
-              <AppButton
-                type="button"
-                variant="ghost"
-                style={styles.editBtn}
-                onClick={() => onEdit(productId)}
-                aria-label="Edit product"
-                title="Edit product"
+          {isMobileViewport ? (
+            <>
+              <div
+                style={{
+                  ...styles.productTopBand,
+                  ...styles.productTopBandMobile,
+                }}
               >
-                <GearIcon size={16} />
-              </AppButton>
-            ) : null}
-          </div>
-
-          <div
-            style={{
-              ...styles.content,
-              ...(isMobileViewport ? styles.contentMobile : null),
-            }}
-          >
-            {isMobileViewport ? (
-              <div style={styles.mobileContentStack}>
-                <div style={styles.card}>{imageSection}</div>
-                <div style={styles.card}>
-                  <div
-                    style={{
-                      ...styles.drawerBody,
-                      ...styles.drawerInfoCardMobile,
-                      height: "auto",
-                      overflowY: "visible",
-                    }}
+                <AppButton type="button" variant="ghost" style={styles.drawerBackBtnTop} onClick={onBack}>
+                  BACK
+                </AppButton>
+                <div style={styles.topTitle}>{productTitle}</div>
+                <div style={styles.topSpacer} />
+                {canEdit && onEdit && productId ? (
+                  <AppButton
+                    type="button"
+                    variant="ghost"
+                    style={styles.editBtn}
+                    onClick={() => onEdit(productId)}
+                    aria-label="Edit product"
+                    title="Edit product"
                   >
-                    {detailsSection}
+                    <GearIcon size={16} />
+                  </AppButton>
+                ) : null}
+              </div>
+
+              <div
+                style={{
+                  ...styles.content,
+                  ...styles.contentMobile,
+                }}
+              >
+                <div style={styles.mobileContentStack}>
+                  <div style={styles.card}>{imageSection}</div>
+                  <div style={styles.card}>
+                    <div
+                      style={{
+                        ...styles.drawerBody,
+                        ...styles.drawerInfoCardMobile,
+                        height: "auto",
+                        overflowY: "visible",
+                      }}
+                    >
+                      {topDetailsSection}
+                      {lowerDetailsSection}
+                    </div>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div style={styles.drawerGrid}>
-                <div style={styles.card}>{imageSection}</div>
-                <div style={styles.card}>
-                  <div style={styles.drawerBody}>
-                    {detailsSection}
+            </>
+          ) : (
+            <div style={styles.desktopShell}>
+              <div style={styles.desktopBackRail}>
+                <AppButton type="button" variant="ghost" style={styles.drawerBackBtnTop} onClick={onBack}>
+                  BACK
+                </AppButton>
+              </div>
+
+              <div style={styles.desktopScrollArea}>
+                <div style={styles.desktopContent}>
+                  {canEdit && onEdit && productId ? (
+                    <div style={styles.desktopHeader}>
+                      <div style={styles.topSpacer} />
+                      <AppButton
+                        type="button"
+                        variant="ghost"
+                        style={styles.editBtn}
+                        onClick={() => onEdit(productId)}
+                        aria-label="Edit product"
+                        title="Edit product"
+                      >
+                        <GearIcon size={16} />
+                      </AppButton>
+                    </div>
+                  ) : null}
+
+                  <div style={styles.drawerGrid}>
+                    <div style={{ ...styles.card, ...styles.desktopImageCell }}>{imageSection}</div>
+                    <div style={{ ...styles.card, ...styles.desktopInfoCell }}>
+                      <div style={styles.drawerBody}>{topDetailsSection}</div>
+                    </div>
+                    <div style={{ ...styles.card, ...styles.desktopDescriptionCell }}>
+                      <div style={styles.drawerBodyWide}>{lowerDetailsSection}</div>
+                    </div>
                   </div>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
         {isMobileViewport ? (
           <div style={styles.mobilePurchaseBar}>
@@ -431,6 +494,38 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     position: "relative",
   },
+  desktopShell: {
+    height: "100%",
+    minHeight: 0,
+    display: "grid",
+    gridTemplateColumns: `${BACK_BTN_W}px minmax(0, 1fr)`,
+    columnGap: TITLE_GAP,
+    padding: "18px 0 0",
+  },
+  desktopBackRail: {
+    minHeight: 0,
+    display: "flex",
+    alignItems: "flex-start",
+  },
+  desktopScrollArea: {
+    minHeight: 0,
+    overflowY: "auto",
+    overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
+    paddingRight: 4,
+  },
+  desktopContent: {
+    width: "100%",
+    maxWidth: "min(1120px, 100%)",
+    paddingBottom: 20,
+  },
+  desktopHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    minWidth: 0,
+    marginBottom: 23,
+  },
   productTopBand: {
     minHeight: 64,
     display: "flex",
@@ -442,13 +537,6 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 66,
     padding: "13px 15px",
     borderBottom: "1px solid rgba(255,255,255,0.3)",
-  },
-  productTopBandDesktopOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 2,
   },
   topTitle: {
     fontSize: TOPBAR_FONT_SIZE,
@@ -477,7 +565,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: BACK_BTN_W,
     minWidth: BACK_BTN_W,
     height: 36,
-    marginRight: TITLE_GAP,
+    marginRight: 0,
     padding: 0,
     borderRadius: 8,
     fontSize: TOPBAR_FONT_SIZE,
@@ -507,13 +595,25 @@ const styles: Record<string, React.CSSProperties> = {
     WebkitOverflowScrolling: "touch",
   },
   drawerGrid: {
-    flex: 1,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gridTemplateColumns: "minmax(0, 0.8fr) minmax(0, 1fr)",
+    gridTemplateRows: "auto auto",
     gap: 32,
     alignItems: "start",
-    maxWidth: "min(1120px, 100%)",
+    width: "100%",
     minHeight: 0,
+  },
+  desktopImageCell: {
+    gridColumn: "1 / 2",
+    gridRow: "1 / 2",
+  },
+  desktopInfoCell: {
+    gridColumn: "2 / 3",
+    gridRow: "1 / 2",
+  },
+  desktopDescriptionCell: {
+    gridColumn: "1 / 3",
+    gridRow: "2 / 3",
   },
   mobileContentStack: {
     width: "100%",
@@ -563,7 +663,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
   },
   mainImageFrame: {
-    width: "100%",
+    width: "80%",
     aspectRatio: "1 / 1",
     borderRadius: 14,
     background: "transparent",
@@ -613,7 +713,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   thumbRow: {
     marginTop: 12,
-    width: "calc(100% - 24px)",
+    width: "calc(80% - 24px)",
     display: "flex",
     gap: 10,
     padding: 12,
@@ -652,13 +752,25 @@ const styles: Record<string, React.CSSProperties> = {
   },
   drawerName: {
     fontSize: 24,
+    fontWeight: 800,
     marginBottom: 30,
     color: "var(--tp-text-color)",
+  },
+  detailBlockTight: {
+    marginTop: 0,
+    display: "grid",
+    gap: 0,
   },
   detailBlock: {
     marginTop: 30,
     display: "grid",
     gap: 8,
+  },
+  detailBlockWide: {
+    marginTop: 30,
+    display: "grid",
+    gap: 8,
+    width: "100%",
   },
   detailRow: {
     display: "grid",
@@ -713,6 +825,15 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     borderTop: "none",
     paddingTop: 0,
+    whiteSpace: "pre-wrap",
+  },
+  drawerCallout: {
+    color: "var(--tp-text-color)",
+    fontWeight: 600,
+    lineHeight: 1.45,
+    fontSize: 15,
+    marginBottom: 20,
+    opacity: 0.88,
   },
   drawerDescMuted: {
     color: "var(--tp-text-color)",
@@ -721,6 +842,24 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     borderTop: "none",
     paddingTop: 0,
+  },
+  drawerBodyWide: {
+    width: "100%",
+    color: "var(--tp-text-color)",
+    marginTop: 0,
+  },
+  loveList: {
+    margin: "6px 0 0",
+    paddingLeft: 0,
+    listStyle: "none",
+  },
+  loveItem: {
+    display: "block",
+    color: "var(--tp-text-color)",
+    opacity: 0.9,
+    lineHeight: 1.5,
+    fontSize: 16,
+    marginBottom: 8,
   },
 
   drawerQtyRow: {

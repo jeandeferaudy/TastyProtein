@@ -1,21 +1,30 @@
 import { supabase } from "@/lib/supabase";
 
+function normalizeOrderStatus(value: unknown): string {
+  const raw = String(value ?? "draft").trim().toLowerCase();
+  return raw === "pending" ? "submitted" : raw || "draft";
+}
+
 export type OrderListItem = {
   id: string;
   order_number?: string | null;
+  access_scope?: "public" | "private" | null;
   created_at: string;
   delivery_date?: string | null;
   total_qty: number;
+  packed_qty_total: number;
   subtotal: number;
   delivery_fee: number;
   thermal_bag_fee: number;
   total_selling_price: number;
+  amount_paid: number | null;
   status: string;
   paid_status: string;
   delivery_status: string;
   full_name?: string | null;
   email?: string | null;
   phone?: string | null;
+  placed_for_someone_else?: boolean | null;
 };
 
 export type OrderDetailItem = {
@@ -35,10 +44,12 @@ export type OrderDetail = {
   id: string;
   created_at: string;
   order_number: string | null;
+  access_scope: "public" | "private";
   total_qty: number;
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  placed_for_someone_else: boolean;
   address: string | null;
   postal_code: string | null;
   notes: string | null;
@@ -65,6 +76,21 @@ export type OrderStatusPatch = {
   delivery_status?: string;
 };
 
+export type OrderAdminPatch = {
+  created_at?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  delivery_date?: string | null;
+  delivery_slot?: string | null;
+  express_delivery?: boolean;
+  add_thermal_bag?: boolean;
+  delivery_fee?: number;
+  total_selling_price?: number;
+};
+
 export async function updateOrderAmountPaid(orderId: string, amountPaid: number | null) {
   const value =
     amountPaid === null || Number.isNaN(Number(amountPaid))
@@ -79,6 +105,19 @@ export async function updateOrderAmountPaid(orderId: string, amountPaid: number 
   if (error) throw new Error(String(error.message ?? error));
   if (!data || data.length === 0) {
     throw new Error("Amount update was blocked (no rows updated). Check RLS/update policy on orders.");
+  }
+}
+
+export async function updateOrderAdminFields(orderId: string, patch: OrderAdminPatch) {
+  const { data, error } = await supabase
+    .from("orders")
+    .update(patch)
+    .eq("id", orderId)
+    .select("id")
+    .limit(1);
+  if (error) throw new Error(String(error.message ?? error));
+  if (!data || data.length === 0) {
+    throw new Error("Order update was blocked (no rows updated). Check RLS/update policy on orders.");
   }
 }
 
@@ -111,9 +150,9 @@ export async function updateOrderPaymentProof(
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `orders/${orderId}/${Date.now()}-${safeName || `proof.${safeExt}`}`;
 
-  const uploadedA = await supabase.storage.from("payment-proofs").upload(path, file, { upsert: true });
+  const uploadedA = await supabase.storage.from("payment-proofs").upload(path, file, { upsert: false });
   if (uploadedA.error) {
-    const uploadedB = await supabase.storage.from("payment_proofs").upload(path, file, { upsert: true });
+    const uploadedB = await supabase.storage.from("payment_proofs").upload(path, file, { upsert: false });
     if (uploadedB.error) throw uploadedB.error;
   }
 
@@ -138,7 +177,7 @@ export async function fetchOrders(params: {
   let query = supabase
     .from("orders")
     .select(
-      "id,order_number,created_at,delivery_date,total_qty,subtotal,delivery_fee,thermal_bag_fee,total_selling_price,status,paid_status,delivery_status,full_name,email,phone"
+      "id,order_number,access_scope,created_at,delivery_date,total_qty,subtotal,delivery_fee,thermal_bag_fee,total_selling_price,amount_paid,status,paid_status,delivery_status,full_name,email,phone,placed_for_someone_else"
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -159,35 +198,47 @@ export async function fetchOrders(params: {
   const base = (data ?? []).map((r: any) => ({
     id: String(r.id),
     order_number: r.order_number ?? null,
+    access_scope:
+      r.access_scope === "public" || r.access_scope === "private" ? r.access_scope : null,
     created_at: String(r.created_at ?? ""),
     delivery_date: r.delivery_date ?? null,
     total_qty: Number(r.total_qty ?? 0),
+    packed_qty_total: 0,
     subtotal: Number(r.subtotal ?? 0),
     delivery_fee: Number(r.delivery_fee ?? 0),
     thermal_bag_fee: Number(r.thermal_bag_fee ?? 0),
     total_selling_price: Number(r.total_selling_price ?? 0),
-    status: String(r.status ?? "draft") as OrderListItem["status"],
+    amount_paid:
+      r.amount_paid === null || r.amount_paid === undefined ? null : Number(r.amount_paid),
+    status: normalizeOrderStatus(r.status) as OrderListItem["status"],
     paid_status: String(r.paid_status ?? "unpaid") as OrderListItem["paid_status"],
     delivery_status: String(r.delivery_status ?? "undelivered") as OrderListItem["delivery_status"],
     full_name: r.full_name ?? null,
     email: r.email ?? null,
     phone: r.phone ?? null,
+    placed_for_someone_else:
+      typeof r.placed_for_someone_else === "boolean" ? r.placed_for_someone_else : null,
   }));
 
-  const ids = base.map((r) => r.id).filter(Boolean);
-  if (!ids.length) return base;
+  const visibleBase = all
+    ? base
+    : base.filter((row) => row.placed_for_someone_else !== true);
+
+  const ids = visibleBase.map((r) => r.id).filter(Boolean);
+  if (!ids.length) return visibleBase;
 
   // Fill missing totals from item rows when orders table fields are stale.
   const hydrateFromItems = (
-    rows: Array<{ order_id?: string; qty?: number; line_total?: number }>,
+    rows: Array<{ order_id?: string; qty?: number; packed_qty?: number | null; line_total?: number }>,
     target: OrderListItem[]
   ) => {
-    const byId = new Map<string, { qty: number; total: number }>();
+    const byId = new Map<string, { qty: number; packedQty: number; total: number }>();
     for (const row of rows) {
       const id = String(row.order_id ?? "");
       if (!id) continue;
-      const prev = byId.get(id) ?? { qty: 0, total: 0 };
+      const prev = byId.get(id) ?? { qty: 0, packedQty: 0, total: 0 };
       prev.qty += Number(row.qty ?? 0);
+      prev.packedQty += Math.max(0, Number(row.packed_qty ?? 0));
       prev.total += Number(row.line_total ?? 0);
       byId.set(id, prev);
     }
@@ -197,6 +248,7 @@ export async function fetchOrders(params: {
       return {
         ...o,
         total_qty: o.total_qty > 0 ? o.total_qty : agg.qty,
+        packed_qty_total: agg.packedQty,
         total_selling_price:
           o.total_selling_price > 0 ? o.total_selling_price : agg.total,
       };
@@ -205,13 +257,13 @@ export async function fetchOrders(params: {
 
   const itemTry = await supabase
     .from("order_lines")
-    .select("order_id,qty,line_total")
+    .select("order_id,qty,packed_qty,line_total")
     .in("order_id", ids);
   if (!itemTry.error && Array.isArray(itemTry.data)) {
-    return hydrateFromItems(itemTry.data as any[], base);
+    return hydrateFromItems(itemTry.data as any[], visibleBase);
   }
 
-  return base;
+  return visibleBase;
 }
 
 export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | null> {
@@ -300,10 +352,12 @@ export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | n
     id: String(order.id),
     created_at: String(order.created_at ?? ""),
     order_number: (order as any).order_number ?? null,
+    access_scope: (order as any).access_scope === "public" ? "public" : "private",
     total_qty: Number((order as any).total_qty ?? 0),
     full_name: (order as any).full_name ?? null,
     email: (order as any).email ?? null,
     phone: (order as any).phone ?? null,
+    placed_for_someone_else: Boolean((order as any).placed_for_someone_else),
     address: (order as any).address ?? null,
     postal_code: (order as any).postal_code ?? null,
     notes: (order as any).notes ?? null,
@@ -321,7 +375,7 @@ export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | n
         : Number((order as any).amount_paid),
     payment_proof_path: paymentProofPath,
     payment_proof_url: paymentProofUrl ?? null,
-    status: String((order as any).status ?? "draft"),
+    status: normalizeOrderStatus((order as any).status),
     paid_status: String((order as any).paid_status ?? "unpaid"),
     delivery_status: String((order as any).delivery_status ?? "undelivered"),
     items: resolvedItems.map((it: any) => ({
@@ -377,11 +431,16 @@ export async function updateOrderLinePackedQty(orderLineId: string, packedQty: n
     packedQty === null || Number.isNaN(Number(packedQty))
       ? null
       : Math.max(0, Math.floor(Number(packedQty)));
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("order_lines")
     .update({ packed_qty: value })
-    .eq("id", orderLineId);
-  if (error) throw error;
+    .eq("id", orderLineId)
+    .select("id")
+    .limit(1);
+  if (error) throw new Error(String(error.message ?? error));
+  if (!data || data.length === 0) {
+    throw new Error("Packed quantity update was blocked (no rows updated). Check RLS/update policy on order_lines.");
+  }
 }
 
 export async function addOrderLinesByAdmin(
@@ -469,4 +528,48 @@ export async function addOrderLinesByAdmin(
     })
     .eq("id", orderId);
   if (updateError) throw asError(updateError.message ?? updateError);
+}
+
+export async function deleteOrderByAdmin(
+  orderId: string,
+  opts?: { paymentProofPath?: string | null }
+) {
+  const asError = (e: unknown) =>
+    e instanceof Error ? e : new Error(typeof e === "string" ? e : JSON.stringify(e));
+
+  const { error: deleteOrderLinesError } = await supabase
+    .from("order_lines")
+    .delete()
+    .eq("order_id", orderId);
+  if (deleteOrderLinesError) throw asError(deleteOrderLinesError.message ?? deleteOrderLinesError);
+
+  const { error: deleteOrderItemsError } = await supabase
+    .from("order_items")
+    .delete()
+    .eq("order_id", orderId);
+  const deleteOrderItemsMessage = String(deleteOrderItemsError?.message ?? "").toLowerCase();
+  const orderItemsMissing =
+    !!deleteOrderItemsError &&
+    deleteOrderItemsMessage.includes("relation") &&
+    deleteOrderItemsMessage.includes("order_items");
+  if (deleteOrderItemsError && !orderItemsMissing) {
+    throw asError(deleteOrderItemsError.message ?? deleteOrderItemsError);
+  }
+
+  const paymentProofPath = String(opts?.paymentProofPath ?? "").trim();
+  if (paymentProofPath) {
+    await supabase.storage.from("payment-proofs").remove([paymentProofPath]);
+    await supabase.storage.from("payment_proofs").remove([paymentProofPath]);
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId)
+    .select("id")
+    .limit(1);
+  if (error) throw asError(error.message ?? error);
+  if (!data || data.length === 0) {
+    throw new Error("Order delete was blocked (no rows deleted). Check RLS/delete policy on orders.");
+  }
 }

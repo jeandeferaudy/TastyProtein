@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
-import type { OrderDetail, OrderStatusPatch } from "@/lib/ordersApi";
+import { AppButton, RemoveIcon, TOPBAR_FONT_SIZE } from "@/components/ui";
+import type { OrderAdminPatch, OrderDetail, OrderStatusPatch } from "@/lib/ordersApi";
 import type { DbProduct } from "@/lib/products";
 
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
   products: DbProduct[];
   loading?: boolean;
   canEdit?: boolean;
+  noticeText?: string | null;
   backgroundStyle?: React.CSSProperties;
   onChangeStatuses?: (orderId: string, patch: OrderStatusPatch) => Promise<void> | void;
   onChangePackedQty?: (orderLineId: string, packedQty: number | null) => Promise<void> | void;
@@ -22,6 +23,8 @@ type Props = {
     file: File | null,
     currentPath: string | null
   ) => Promise<void> | void;
+  onChangeAdminFields?: (orderId: string, patch: OrderAdminPatch) => Promise<void> | void;
+  onDeleteOrder?: (orderId: string, paymentProofPath: string | null) => Promise<void> | void;
   onAddLines?: (
     orderId: string,
     items: Array<{ productId: string; qty: number }>
@@ -30,9 +33,10 @@ type Props = {
 
 const STATUS_OPTIONS = ["draft", "submitted", "confirmed", "completed"];
 const PAYMENT_OPTIONS = ["unpaid", "processed", "paid"];
-const DELIVERY_OPTIONS = ["unpacked", "packed", "in progress", "undelivered", "delivered"];
+const DELIVERY_OPTIONS = ["unpacked", "packed", "in progress", "delivered"];
 const BACK_BTN_W = 68;
-const TITLE_GAP = 24;
+const TITLE_GAP = 40;
+const STATUS_CONTROL_W = 148;
 
 function fmtMoney(v: number) {
   return v.toLocaleString("en-PH");
@@ -117,11 +121,14 @@ export default function OrderDrawer({
   products,
   loading = false,
   canEdit = false,
+  noticeText = null,
   backgroundStyle,
   onChangeStatuses,
   onChangePackedQty,
   onChangeAmountPaid,
   onChangePaymentProof,
+  onChangeAdminFields,
+  onDeleteOrder,
   onAddLines,
 }: Props) {
   const [statusDraft, setStatusDraft] = React.useState({
@@ -134,13 +141,29 @@ export default function OrderDrawer({
   const [savingStatus, setSavingStatus] = React.useState(false);
   const [savingPacked, setSavingPacked] = React.useState<Record<string, boolean>>({});
   const [savingAmountPaid, setSavingAmountPaid] = React.useState(false);
+  const [savingAdminFields, setSavingAdminFields] = React.useState(false);
   const [proofOpen, setProofOpen] = React.useState(false);
   const [savingProof, setSavingProof] = React.useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
+  const [deletingOrder, setDeletingOrder] = React.useState(false);
   const [addLinesOpen, setAddLinesOpen] = React.useState(false);
   const [addLineSearch, setAddLineSearch] = React.useState("");
   const [addQtyByProduct, setAddQtyByProduct] = React.useState<Record<string, number>>({});
   const [savingAddLines, setSavingAddLines] = React.useState(false);
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
+  const [adminDraft, setAdminDraft] = React.useState({
+    created_at: "",
+    full_name: "",
+    email: "",
+    phone: "",
+    address: "",
+    notes: "",
+    delivery_date: "",
+    delivery_slot: "",
+    express_delivery: false,
+    add_thermal_bag: false,
+    delivery_fee: "",
+  });
 
   React.useEffect(() => {
     const onResize = () => setIsMobileViewport(window.innerWidth < 768);
@@ -151,9 +174,13 @@ export default function OrderDrawer({
 
   React.useEffect(() => {
     if (!detail) return;
+    const initialPaidStatus =
+      detail.payment_proof_url && String(detail.paid_status || "unpaid").toLowerCase() === "unpaid"
+        ? "processed"
+        : String(detail.paid_status || "processed");
     setStatusDraft({
       status: String(detail.status || "submitted"),
-      paid_status: String(detail.paid_status || "processed"),
+      paid_status: initialPaidStatus,
       delivery_status: String(detail.delivery_status || "unpacked"),
     });
     const nextPacked: Record<string, string> = {};
@@ -162,7 +189,20 @@ export default function OrderDrawer({
         line.packed_qty === null || line.packed_qty === undefined ? "" : String(line.packed_qty);
     }
     setPackedDraftById(nextPacked);
-    setAmountPaidDraft(String(detail.amount_paid ?? detail.total_selling_price));
+    setAmountPaidDraft(String(detail.amount_paid ?? 0));
+    setAdminDraft({
+      created_at: detail.created_at ? String(detail.created_at).slice(0, 10) : "",
+      full_name: detail.full_name ?? "",
+      email: detail.email ?? "",
+      phone: detail.phone ?? "",
+      address: detail.address ?? "",
+      notes: detail.notes ?? "",
+      delivery_date: detail.delivery_date ?? "",
+      delivery_slot: detail.delivery_slot ?? "",
+      express_delivery: detail.express_delivery,
+      add_thermal_bag: detail.add_thermal_bag,
+      delivery_fee: String(detail.delivery_fee ?? 0),
+    });
   }, [detail]);
 
   const saveStatusPatch = React.useCallback(
@@ -190,6 +230,11 @@ export default function OrderDrawer({
       setSavingPacked((prev) => ({ ...prev, [lineId]: true }));
       try {
         await onChangePackedQty(lineId, next);
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save packed quantity.";
+        alert(msg);
+        console.error("Failed to save packed quantity", e);
       } finally {
         setSavingPacked((prev) => ({ ...prev, [lineId]: false }));
       }
@@ -225,6 +270,24 @@ export default function OrderDrawer({
       }
     },
     [detail, onChangePaymentProof]
+  );
+
+  const saveAdminFields = React.useCallback(
+    async (patch: OrderAdminPatch) => {
+      if (!detail || !onChangeAdminFields) return;
+      setSavingAdminFields(true);
+      try {
+        await onChangeAdminFields(detail.id, patch);
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save order details.";
+        alert(msg);
+        console.error("Failed to save admin order fields", e);
+      } finally {
+        setSavingAdminFields(false);
+      }
+    },
+    [detail, onChangeAdminFields]
   );
 
   const proofFileName = React.useMemo(() => {
@@ -264,6 +327,32 @@ export default function OrderDrawer({
     if (!detail) return 0;
     return amountPaid - detail.total_selling_price;
   }, [amountPaid, detail]);
+
+  const paymentDeltaMessage = React.useMemo(() => {
+    if (paymentDelta === 0) {
+      return {
+        label: "Amount paid is correct",
+        tone: styles.paymentDeltaRowOk,
+      };
+    }
+    if (paymentDelta < 0) {
+      return {
+        label: `Amount due: ₱ ${fmtMoney(Math.abs(paymentDelta))}`,
+        tone: styles.paymentDeltaRowWarn,
+      };
+    }
+    return {
+      label: `Refund due: ₱ ${fmtMoney(paymentDelta)}`,
+      tone: styles.paymentDeltaRow,
+    };
+  }, [paymentDelta]);
+
+  const computedDisplayTotal = React.useMemo(() => {
+    if (!detail) return 0;
+    const rawFee = Number(adminDraft.delivery_fee);
+    const deliveryFee = Number.isNaN(rawFee) ? Number(detail.delivery_fee ?? 0) : Math.max(0, rawFee);
+    return Number(detail.subtotal ?? 0) + deliveryFee + Number(detail.thermal_bag_fee ?? 0);
+  }, [adminDraft.delivery_fee, detail]);
 
   const totalUnits = React.useMemo(
     () => (detail ? detail.items.reduce((sum, it) => sum + Number(it.qty ?? 0), 0) : 0),
@@ -325,11 +414,30 @@ export default function OrderDrawer({
     }
   }, [addQtyByProduct, detail, onAddLines]);
 
+  const confirmDeleteOrder = React.useCallback(async () => {
+    if (!detail || !onDeleteOrder || deletingOrder) return;
+    setDeletingOrder(true);
+    try {
+      await onDeleteOrder(detail.id, detail.payment_proof_path ?? null);
+      setDeleteConfirmOpen(false);
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to delete order.";
+      alert(msg);
+      console.error("Failed to delete order", e);
+    } finally {
+      setDeletingOrder(false);
+    }
+  }, [deletingOrder, detail, onDeleteOrder]);
+
   if (!isOpen) return null;
 
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
   const orderNo = detail ? detail.order_number ?? orderNumber8(detail.id) : "—";
+  const statusKey = String(statusDraft.status || "").toLowerCase();
+  const headerSuffix =
+    statusKey === "submitted" || statusKey === "draft" ? " WAITING TO BE PACKED" : "";
   const showPackedColumn = true;
   const itemGridTemplate = "1fr 84px 90px 108px";
 
@@ -341,7 +449,10 @@ export default function OrderDrawer({
           <AppButton variant="ghost" style={styles.backBtn} onClick={onBack}>
             BACK
           </AppButton>
-          <div style={styles.title}>ORDER #{orderNo}</div>
+          <div style={styles.title}>
+            ORDER #{orderNo}
+            {headerSuffix ? <span style={styles.titleStatusSuffix}>{headerSuffix}</span> : null}
+          </div>
           {!loading && detail ? (
             <div style={styles.statusGroup}>
               <div style={styles.statusField}>
@@ -434,6 +545,7 @@ export default function OrderDrawer({
 
           {!loading && detail ? (
             <div style={styles.sectionGrid}>
+              {noticeText ? <div style={styles.publicNotice}>{noticeText}</div> : null}
               <section style={styles.leftCol}>
                 <div style={styles.sectionTitle}>CART</div>
                 <div style={styles.itemListScroll}>
@@ -510,7 +622,9 @@ export default function OrderDrawer({
                         gridColumn: 4,
                       }}
                     >
-                      {detail.delivery_fee > 0 ? `₱ ${fmtMoney(detail.delivery_fee)}` : "FREE"}
+                      {Number(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee) > 0
+                        ? `₱ ${fmtMoney(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee)}`
+                        : "FREE"}
                     </strong>
                   </div>
                   <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
@@ -533,7 +647,7 @@ export default function OrderDrawer({
                         gridColumn: 4,
                       }}
                     >
-                      ₱ {fmtMoney(detail.total_selling_price)}
+                      ₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}
                     </strong>
                   </div>
                 </div>
@@ -548,6 +662,14 @@ export default function OrderDrawer({
                     >
                       + ADD PRODUCT
                     </AppButton>
+                    <AppButton
+                      type="button"
+                      variant="ghost"
+                      style={styles.deleteOrderBtn}
+                      onClick={() => setDeleteConfirmOpen(true)}
+                    >
+                      DELETE ORDER
+                    </AppButton>
                   </div>
                 ) : null}
               </section>
@@ -561,7 +683,31 @@ export default function OrderDrawer({
                   </div>
                   <div style={styles.kvRow}>
                     <span>Placed on</span>
-                    <strong>{fmtDate(detail.created_at)}</strong>
+                    {canEdit ? (
+                      <input
+                        type="date"
+                        value={adminDraft.created_at}
+                        onChange={(e) =>
+                          setAdminDraft((prev) => ({ ...prev, created_at: e.target.value }))
+                        }
+                        onBlur={() => {
+                          const nextDate = adminDraft.created_at;
+                          if (!nextDate) {
+                            void saveAdminFields({ created_at: null });
+                            return;
+                          }
+                          const existing = detail.created_at ? new Date(detail.created_at) : null;
+                          const timePart =
+                            existing && !Number.isNaN(existing.getTime())
+                              ? existing.toISOString().slice(11, 24)
+                              : "00:00:00.000Z";
+                          void saveAdminFields({ created_at: `${nextDate}T${timePart}` });
+                        }}
+                        style={styles.kvInput}
+                      />
+                    ) : (
+                      <strong>{fmtDate(detail.created_at)}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Items</span>
@@ -577,25 +723,70 @@ export default function OrderDrawer({
                   <div style={styles.sectionTitle}>CUSTOMER</div>
                   <div style={styles.kvRow}>
                     <span>Name</span>
-                    <strong>{detail.full_name || "—"}</strong>
+                    {canEdit ? (
+                      <input
+                        value={adminDraft.full_name}
+                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, full_name: e.target.value }))}
+                        onBlur={() => void saveAdminFields({ full_name: adminDraft.full_name.trim() || null })}
+                        style={styles.kvInput}
+                      />
+                    ) : (
+                      <strong>{detail.full_name || "—"}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Email</span>
-                    <strong>{detail.email || "—"}</strong>
+                    {canEdit ? (
+                      <input
+                        value={adminDraft.email}
+                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, email: e.target.value }))}
+                        onBlur={() => void saveAdminFields({ email: adminDraft.email.trim() || null })}
+                        style={styles.kvInput}
+                      />
+                    ) : (
+                      <strong>{detail.email || "—"}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Mobile</span>
-                    <strong>{detail.phone || "—"}</strong>
+                    {canEdit ? (
+                      <input
+                        value={adminDraft.phone}
+                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                        onBlur={() => void saveAdminFields({ phone: adminDraft.phone.trim() || null })}
+                        style={styles.kvInput}
+                      />
+                    ) : (
+                      <strong>{detail.phone || "—"}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Address</span>
-                    <strong>{detail.address || "—"}</strong>
+                    {canEdit ? (
+                      <textarea
+                        value={adminDraft.address}
+                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, address: e.target.value }))}
+                        onBlur={() => void saveAdminFields({ address: adminDraft.address.trim() || null })}
+                        style={{ ...styles.kvInput, ...styles.kvTextarea }}
+                      />
+                    ) : (
+                      <strong>{detail.address || "—"}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Notes</span>
-                    <strong style={detail.notes ? styles.adminHighlight : undefined}>
-                      {detail.notes || "—"}
-                    </strong>
+                    {canEdit ? (
+                      <textarea
+                        value={adminDraft.notes}
+                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                        onBlur={() => void saveAdminFields({ notes: adminDraft.notes.trim() || null })}
+                        style={{ ...styles.kvInput, ...styles.kvTextarea }}
+                      />
+                    ) : (
+                      <strong style={detail.notes ? styles.adminHighlight : undefined}>
+                        {detail.notes || "—"}
+                      </strong>
+                    )}
                   </div>
                 </div>
 
@@ -603,19 +794,76 @@ export default function OrderDrawer({
                   <div style={styles.sectionTitle}>DELIVERY</div>
                   <div style={styles.kvRow}>
                     <span>Schedule</span>
-                    <strong>{fmtDateTime(detail.delivery_date, detail.delivery_slot)}</strong>
+                    {canEdit ? (
+                      <div style={styles.kvFieldStack}>
+                        <input
+                          type="date"
+                          value={adminDraft.delivery_date}
+                          onChange={(e) =>
+                            setAdminDraft((prev) => ({ ...prev, delivery_date: e.target.value }))
+                          }
+                          onBlur={() =>
+                            void saveAdminFields({ delivery_date: adminDraft.delivery_date || null })
+                          }
+                          style={styles.kvInput}
+                        />
+                        <input
+                          value={adminDraft.delivery_slot}
+                          onChange={(e) =>
+                            setAdminDraft((prev) => ({ ...prev, delivery_slot: e.target.value }))
+                          }
+                          onBlur={() =>
+                            void saveAdminFields({ delivery_slot: adminDraft.delivery_slot.trim() || null })
+                          }
+                          placeholder="HH:MM"
+                          style={styles.kvInput}
+                        />
+                      </div>
+                    ) : (
+                      <strong>{fmtDateTime(detail.delivery_date, detail.delivery_slot)}</strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Express</span>
-                    <strong style={detail.express_delivery ? styles.adminHighlight : undefined}>
-                      {detail.express_delivery ? "YES" : "No"}
-                    </strong>
+                    {canEdit ? (
+                      <label style={styles.kvCheckRow}>
+                        <input
+                          type="checkbox"
+                          checked={adminDraft.express_delivery}
+                          onChange={(e) => {
+                            const next = e.target.checked;
+                            setAdminDraft((prev) => ({ ...prev, express_delivery: next }));
+                            void saveAdminFields({ express_delivery: next });
+                          }}
+                        />
+                        <span>{adminDraft.express_delivery ? "YES" : "No"}</span>
+                      </label>
+                    ) : (
+                      <strong style={detail.express_delivery ? styles.adminHighlight : undefined}>
+                        {detail.express_delivery ? "YES" : "No"}
+                      </strong>
+                    )}
                   </div>
                   <div style={styles.kvRow}>
                     <span>Packaging</span>
-                    <strong style={detail.add_thermal_bag ? styles.adminHighlight : undefined}>
-                      {detail.add_thermal_bag ? "Thermal bag" : "Standard bag"}
-                    </strong>
+                    {canEdit ? (
+                      <select
+                        value={adminDraft.add_thermal_bag ? "thermal" : "standard"}
+                        onChange={(e) => {
+                          const next = e.target.value === "thermal";
+                          setAdminDraft((prev) => ({ ...prev, add_thermal_bag: next }));
+                          void saveAdminFields({ add_thermal_bag: next });
+                        }}
+                        style={styles.kvInput}
+                      >
+                        <option value="standard">Standard bag</option>
+                        <option value="thermal">Thermal bag</option>
+                      </select>
+                    ) : (
+                      <strong style={detail.add_thermal_bag ? styles.adminHighlight : undefined}>
+                        {detail.add_thermal_bag ? "Thermal bag" : "Standard bag"}
+                      </strong>
+                    )}
                   </div>
                 </div>
 
@@ -655,49 +903,70 @@ export default function OrderDrawer({
                           aria-label="Remove uploaded proof"
                           title="Remove file"
                         >
-                          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                            <path
-                              d="M6 6l12 12M18 6L6 18"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                          </svg>
+                          <RemoveIcon size={14} />
                         </button>
                       ) : null}
                     </div>
                   </div>
-                  {savingProof ? <div style={styles.savingTiny}>saving...</div> : null}
+                  {savingProof || savingAdminFields ? <div style={styles.savingTiny}>saving...</div> : null}
                   <div style={styles.kvRow}>
                     <span>Amount paid</span>
                     <div style={styles.amountPaidInline}>
                       {canEdit ? (
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={amountPaidDraft}
-                          onChange={(e) => setAmountPaidDraft(e.target.value)}
-                          onBlur={() => {
-                            void saveAmountPaid();
-                          }}
-                          style={styles.amountPaidInput}
-                        />
+                        <>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={amountPaidDraft}
+                            onChange={(e) => setAmountPaidDraft(e.target.value)}
+                            onBlur={() => {
+                              void saveAmountPaid();
+                            }}
+                            style={{ ...styles.amountPaidInput, ...paymentDeltaMessage.tone }}
+                          />
+                          <div style={{ ...paymentDeltaMessage.tone, ...styles.paymentDeltaInline }}>
+                            {paymentDeltaMessage.label}
+                          </div>
+                        </>
                       ) : (
-                        <strong>₱ {fmtMoney(amountPaid)}</strong>
+                        <strong style={styles.amountPaidValue}>
+                          ₱ {fmtMoney(amountPaid)}
+                        </strong>
                       )}
-                      {paymentDelta > 0 ? (
-                        <div style={{ ...styles.paymentDeltaRow, ...styles.paymentDeltaInline }}>
-                          Refund due: <strong>₱ {fmtMoney(paymentDelta)}</strong>
-                        </div>
-                      ) : null}
-                      {paymentDelta < 0 ? (
-                        <div style={{ ...styles.paymentDeltaRowWarn, ...styles.paymentDeltaInline }}>
-                          Amount due: <strong>₱ {fmtMoney(Math.abs(paymentDelta))}</strong>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                   {savingAmountPaid ? <div style={styles.savingTiny}>saving...</div> : null}
+                  <div style={styles.kvRow}>
+                    <span>Delivery fee</span>
+                    {canEdit ? (
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={adminDraft.delivery_fee}
+                        onChange={(e) =>
+                          setAdminDraft((prev) => ({ ...prev, delivery_fee: e.target.value }))
+                        }
+                        onBlur={() => {
+                          const raw = Number(adminDraft.delivery_fee);
+                          const nextFee = Number.isNaN(raw) ? 0 : Math.max(0, raw);
+                          void saveAdminFields({
+                            delivery_fee: nextFee,
+                            total_selling_price:
+                              Number(detail.subtotal ?? 0) +
+                              nextFee +
+                              Number(detail.thermal_bag_fee ?? 0),
+                          });
+                        }}
+                        style={styles.amountPaidInput}
+                      />
+                    ) : (
+                      <strong>{detail.delivery_fee > 0 ? `₱ ${fmtMoney(detail.delivery_fee)}` : "FREE"}</strong>
+                    )}
+                  </div>
+                  <div style={styles.kvRow}>
+                    <span>Total</span>
+                    <strong>₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}</strong>
+                  </div>
                 </div>
               </section>
             </div>
@@ -813,6 +1082,41 @@ export default function OrderDrawer({
           </div>
         </div>
       ) : null}
+
+      {deleteConfirmOpen && detail ? (
+        <div
+          style={styles.previewBackdrop}
+          onClick={() => (deletingOrder ? null : setDeleteConfirmOpen(false))}
+        >
+          <div style={styles.confirmModal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.confirmTitle}>DELETE ORDER #{orderNo}?</div>
+            <div style={styles.confirmText}>
+              This will permanently delete the order and all related order details. This action cannot be undone.
+            </div>
+            <div style={styles.confirmActions}>
+              <AppButton
+                type="button"
+                variant="ghost"
+                style={styles.confirmCancelBtn}
+                onClick={() => setDeleteConfirmOpen(false)}
+                disabled={deletingOrder}
+              >
+                CANCEL
+              </AppButton>
+              <AppButton
+                type="button"
+                style={styles.confirmDeleteBtn}
+                onClick={() => {
+                  void confirmDeleteOrder();
+                }}
+                disabled={deletingOrder}
+              >
+                {deletingOrder ? "DELETING..." : "YES, DELETE"}
+              </AppButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -835,7 +1139,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 64,
     display: "flex",
     alignItems: "center",
-    gap: 18,
+    gap: TITLE_GAP,
     padding: "18px 0 15px",
   },
   backBtn: {
@@ -853,6 +1157,13 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
   },
   title: { fontSize: TOPBAR_FONT_SIZE, fontWeight: 900, letterSpacing: 1.4, color: "var(--tp-text-color)" },
+  titleStatusSuffix: {
+    marginLeft: 12,
+    fontSize: TOPBAR_FONT_SIZE,
+    fontWeight: 700,
+    letterSpacing: 1,
+    color: "#c38a28",
+  },
   content: {
     flex: 1,
     overflow: "hidden",
@@ -873,7 +1184,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   statusSelect: {
     height: 34,
-    minWidth: 106,
+    width: STATUS_CONTROL_W,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
@@ -883,7 +1194,7 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
   },
   statusChip: {
-    minWidth: 106,
+    width: STATUS_CONTROL_W,
     height: 34,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
@@ -902,6 +1213,16 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "1.05fr 1fr",
     gap: 20,
     paddingRight: 0,
+  },
+  publicNotice: {
+    gridColumn: "1 / -1",
+    border: "1px solid rgba(102,199,255,0.42)",
+    background: "rgba(102,199,255,0.12)",
+    color: "var(--tp-text-color)",
+    borderRadius: 10,
+    padding: "12px 14px",
+    fontSize: 15,
+    lineHeight: 1.45,
   },
   leftCol: {
     order: 2,
@@ -1010,6 +1331,36 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 8,
     fontSize: 15,
   },
+  kvInput: {
+    width: "100%",
+    minWidth: 0,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    fontSize: 15,
+    padding: "0 10px",
+  },
+  kvTextarea: {
+    minHeight: 72,
+    height: "auto",
+    padding: "8px 10px",
+    resize: "vertical",
+    lineHeight: 1.4,
+    fontFamily: "inherit",
+  },
+  kvFieldStack: {
+    display: "grid",
+    gap: 8,
+  },
+  kvCheckRow: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 15,
+    fontWeight: 700,
+  },
   proofCell: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" },
   uploadBtn: {
     height: 30,
@@ -1047,9 +1398,9 @@ const styles: Record<string, React.CSSProperties> = {
     width: 30,
     height: 30,
     borderRadius: 8,
-    border: "1px solid var(--tp-border-color-soft)",
-    background: "var(--tp-control-bg-soft)",
-    color: "var(--tp-text-color)",
+    border: "1px solid rgba(214,74,74,0.46)",
+    background: "rgba(214,74,74,0.14)",
+    color: "#ff6b6b",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1068,18 +1419,24 @@ const styles: Record<string, React.CSSProperties> = {
   },
   amountPaidInline: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "baseline",
     gap: 12,
     minWidth: 0,
+    flexWrap: "wrap",
+  },
+  amountPaidValue: {
+    fontSize: 15,
+    fontWeight: 800,
   },
   paymentDeltaInline: {
     marginTop: 0,
     whiteSpace: "nowrap",
   },
   paymentDeltaRow: { marginTop: 4, fontSize: 15, color: "#66c7ff" },
-  paymentDeltaRowWarn: { marginTop: 4, fontSize: 15, color: "#66c7ff" },
+  paymentDeltaRowWarn: { marginTop: 4, fontSize: 15, color: "#de6464" },
+  paymentDeltaRowOk: { marginTop: 4, fontSize: 15, color: "#67bf8a" },
   adminHighlight: { color: "#66c7ff", fontWeight: 900 },
-  addLineRow: { marginTop: 14, display: "flex", justifyContent: "flex-start" },
+  addLineRow: { marginTop: 14, display: "flex", justifyContent: "space-between", gap: 12 },
   addLineBtn: {
     height: 34,
     paddingInline: 14,
@@ -1087,6 +1444,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     fontWeight: 700,
     letterSpacing: 0.8,
+  },
+  deleteOrderBtn: {
+    height: 34,
+    paddingInline: 14,
+    borderRadius: 8,
+    fontSize: 15,
+    fontWeight: 700,
+    letterSpacing: 0.8,
+    borderColor: "rgba(194, 77, 77, 0.44)",
+    color: "#8d1f1f",
+    background: "rgba(194, 77, 77, 0.12)",
   },
   previewBackdrop: {
     position: "fixed",
@@ -1134,6 +1502,42 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color-soft)",
     borderRadius: 8,
     background: "var(--tp-control-bg-soft)",
+  },
+  confirmModal: {
+    width: "min(460px, calc(100vw - 32px))",
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: 12,
+    background: "#000",
+    padding: 18,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: 900,
+    letterSpacing: 1,
+    color: "#fff",
+  },
+  confirmText: {
+    fontSize: 15,
+    lineHeight: 1.5,
+    color: "rgba(255,255,255,0.84)",
+  },
+  confirmActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 4,
+  },
+  confirmCancelBtn: {
+    minWidth: 110,
+  },
+  confirmDeleteBtn: {
+    minWidth: 140,
+    background: "#8d1f1f",
+    color: "#fff",
+    borderColor: "#8d1f1f",
   },
   addLinesModal: {
     width: "min(100%, 980px)",

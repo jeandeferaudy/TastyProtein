@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AppButton, TOPBAR_FONT_SIZE } from "@/components/ui";
+import { AppButton, RemoveIcon, TOPBAR_FONT_SIZE } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import type { DbProduct, ProductImage } from "@/lib/products";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
@@ -13,7 +13,7 @@ type Props = {
   images: ProductImage[];
   backgroundStyle?: React.CSSProperties;
   onClose: () => void;
-  onSaved: () => Promise<void> | void;
+  onSaved: (next: { product: DbProduct; images: ProductImage[] }) => Promise<void> | void;
   onDeleted?: () => Promise<void> | void;
 };
 
@@ -21,6 +21,8 @@ type Draft = {
   name: string;
   long_name: string;
   description: string;
+  callout_text: string;
+  love_points: string;
   type: string;
   size: string;
   size_g: string;
@@ -43,8 +45,17 @@ type ImageRow = {
   url: string;
 };
 
+type SaveRequest = {
+  draftOverride?: Draft;
+  sizeUnitOverride?: SizeUnit;
+  imageRowsOverride?: ImageRow[];
+};
+
 const PRODUCT_IMAGE_BUCKET = "product-images";
 const STATUS_OPTIONS = ["Active", "Disabled", "Archived"] as const;
+const TEMPERATURE_OPTIONS = ["Frozen", "Chilled", "Ambient"] as const;
+const PACKAGING_OPTIONS = ["Pack", "Vacuum Sealed", "Box"] as const;
+const PREPARATION_OPTIONS = ["Raw", "Processed", "Sous-vide"] as const;
 type SizeUnit = "g" | "ml";
 
 function buildAutoKeywords(draft: Draft, computedSizeText: string): string {
@@ -59,7 +70,6 @@ function buildAutoKeywords(draft: Draft, computedSizeText: string): string {
     draft.country_of_origin,
     computedSizeText || draft.size,
     draft.size_g ? `${draft.size_g}g` : "",
-    draft.description,
     draft.status,
     draft.keywords,
   ]
@@ -86,6 +96,8 @@ function toDraft(p: DbProduct): Draft {
     name: p.name ?? "",
     long_name: p.long_name ?? "",
     description: p.description ?? "",
+    callout_text: p.callout_text ?? "",
+    love_points: p.love_points ?? "",
     type: p.type ?? "",
     size: p.size ?? "",
     size_g: p.size_g != null ? String(p.size_g) : "",
@@ -146,6 +158,8 @@ export default function ProductEditorDrawer({
   const lastSavedSnapshotRef = React.useRef<string>("");
   const liveSnapshotRef = React.useRef<string>("");
   const currentProductIdRef = React.useRef<string | null>(null);
+  const savingRef = React.useRef(false);
+  const queuedSaveRef = React.useRef<SaveRequest | null>(null);
 
   React.useEffect(() => {
     if (!draft) {
@@ -227,12 +241,27 @@ export default function ProductEditorDrawer({
   const mainFieldRowStyle = isMobileViewport ? styles.mainFieldRowMobile : styles.mainFieldRow;
   const mainFieldLabelStyle = isMobileViewport ? styles.mainFieldLabelMobile : styles.mainFieldLabel;
 
-  const setField = (k: keyof Draft, v: string) => setDraft((prev) => (prev ? { ...prev, [k]: v } : prev));
+  const setField = (k: keyof Draft, v: string) =>
+    setDraft((prev) => (prev ? { ...prev, [k]: v ?? "" } : prev));
 
   const removeImage = (id: string) => {
     setImageRows((prev) => {
+      const removed = prev.find((row) => row.id === id);
       const next = prev.filter((row) => row.id !== id);
-      void saveWith({ imageRowsOverride: next });
+      const repairedDraft =
+        removed && draft && draft.thumbnail_url.trim() === removed.url.trim()
+          ? {
+              ...draft,
+              thumbnail_url: reindexRows(next)[0]?.url ?? "",
+            }
+          : draft;
+      if (repairedDraft && repairedDraft !== draft) {
+        setDraft(repairedDraft);
+      }
+      void saveWith({
+        imageRowsOverride: next,
+        ...(repairedDraft && repairedDraft !== draft ? { draftOverride: repairedDraft } : null),
+      });
       return next;
     });
   };
@@ -359,18 +388,24 @@ export default function ProductEditorDrawer({
     draftOverride,
     sizeUnitOverride,
     imageRowsOverride,
-  }: {
-    draftOverride?: Draft;
-    sizeUnitOverride?: SizeUnit;
-    imageRowsOverride?: ImageRow[];
-  } = {}) => {
+  }: SaveRequest = {}) => {
+    if (savingRef.current) {
+      queuedSaveRef.current = {
+        draftOverride,
+        sizeUnitOverride,
+        imageRowsOverride,
+      };
+      return;
+    }
+
     const activeDraft = draftOverride ?? draft;
     const activeSizeUnit = sizeUnitOverride ?? sizeUnit;
     const activeRows = imageRowsOverride ?? imageRows;
     if (!activeDraft) return;
     setError("");
-    const nextSnapshot = buildSnapshot(activeDraft, activeSizeUnit, activeRows);
-    if (nextSnapshot === lastSavedSnapshotRef.current) return;
+    const requestedSnapshot = buildSnapshot(activeDraft, activeSizeUnit, activeRows);
+    if (requestedSnapshot === lastSavedSnapshotRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const selling = activeDraft.selling_price.trim() ? Number(activeDraft.selling_price) : null;
@@ -385,10 +420,21 @@ export default function ProductEditorDrawer({
 
       const computedSizeText = formatAutoSizeText(activeDraft.size_g, activeSizeUnit);
       const autoKeywords = buildAutoKeywords(activeDraft, computedSizeText);
+      const cleaned = reindexRows(activeRows)
+        .map((row) => ({ ...row, url: row.url.trim() }))
+        .filter((row) => row.url)
+        .sort((a, b) => a.sort_order - b.sort_order);
+      const ownThumb = activeDraft.thumbnail_url.trim() || null;
+      const thumbStillPresent = ownThumb ? cleaned.some((row) => row.url === ownThumb) : false;
+      const resolvedThumbnailUrl = ownThumb && (thumbStillPresent || cleaned.length === 0)
+        ? ownThumb
+        : cleaned[0]?.url ?? null;
       const productPayload = {
         name: activeDraft.name || null,
         long_name: activeDraft.long_name || null,
         description: activeDraft.description || null,
+        callout_text: activeDraft.callout_text || null,
+        love_points: activeDraft.love_points || null,
         type: activeDraft.type || null,
         cut: activeDraft.cut || null,
         preparation: activeDraft.preparation || null,
@@ -399,7 +445,7 @@ export default function ProductEditorDrawer({
         country_of_origin: activeDraft.country_of_origin || null,
         selling_price: selling,
         product_cost: cost,
-        thumbnail_url: activeDraft.thumbnail_url || null,
+        thumbnail_url: resolvedThumbnailUrl,
         keywords: autoKeywords || null,
         status: activeDraft.status || null,
         sort: sortValue,
@@ -423,11 +469,6 @@ export default function ProductEditorDrawer({
         .eq("product_id", product.id);
       if (delErr) throw delErr;
 
-      const cleaned = reindexRows(activeRows)
-        .map((row) => ({ ...row, url: row.url.trim() }))
-        .filter((row) => row.url)
-        .sort((a, b) => a.sort_order - b.sort_order);
-
       if (cleaned.length > 0) {
         const payload = cleaned.map((row) => ({
           product_id: product.id,
@@ -438,8 +479,38 @@ export default function ProductEditorDrawer({
         if (insErr) throw insErr;
       }
 
-      await onSaved();
-      lastSavedSnapshotRef.current = nextSnapshot;
+      const normalizedDraft: Draft = {
+        ...activeDraft,
+        thumbnail_url: resolvedThumbnailUrl ?? "",
+        keywords: autoKeywords,
+        size: computedSizeText,
+      };
+      const savedSnapshot = buildSnapshot(normalizedDraft, activeSizeUnit, cleaned);
+      lastSavedSnapshotRef.current = savedSnapshot;
+      liveSnapshotRef.current = savedSnapshot;
+      setDraft((prev) => (prev ? normalizedDraft : prev));
+      setImageRows(cleaned);
+      const savedImages: ProductImage[] = cleaned.map((row) => ({
+        id: row.id,
+        product_id: String(product.id),
+        sort_order: row.sort_order,
+        url: row.url,
+      }));
+      const orderOne = savedImages.find((img) => img.sort_order === 1)?.url ?? null;
+      const firstImage = savedImages[0]?.url ?? null;
+      const savedProduct: DbProduct = {
+        ...product,
+        ...productPayload,
+        id: String(product.id),
+        thumbnail_url: resolvedThumbnailUrl ?? orderOne ?? firstImage,
+        keywords: autoKeywords || null,
+        size: computedSizeText || null,
+        size_g: sizeG,
+        selling_price: selling,
+        product_cost: cost,
+        sort: sortValue,
+      };
+      await onSaved({ product: savedProduct, images: savedImages });
       setSavedNoticeAt(Date.now());
     } catch (e) {
       const message =
@@ -458,7 +529,17 @@ export default function ProductEditorDrawer({
           : "";
       setError([message, details, hint].filter(Boolean).join(" — "));
     } finally {
+      savingRef.current = false;
       setSaving(false);
+      const queued = queuedSaveRef.current;
+      queuedSaveRef.current = null;
+      if (queued) {
+        void saveWith(queued);
+        return;
+      }
+      if (liveSnapshotRef.current && liveSnapshotRef.current !== lastSavedSnapshotRef.current) {
+        void saveWith();
+      }
     }
   };
 
@@ -635,12 +716,7 @@ export default function ProductEditorDrawer({
                         aria-label="Delete image"
                         title="Delete image"
                       >
-                        <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true">
-                          <path
-                            d="M9 4h6l1 2h4v2H4V6h4l1-2Zm1 6h2v8h-2v-8Zm4 0h2v8h-2v-8ZM8 10h2v8H8v-8Z"
-                            fill="currentColor"
-                          />
-                        </svg>
+                        <RemoveIcon size={18} />
                       </button>
                     </div>
                   </div>
@@ -666,6 +742,16 @@ export default function ProductEditorDrawer({
                   value={draft.long_name}
                   onChange={(e) => setField("long_name", e.target.value)}
                   onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Callout</label>
+                <input
+                  style={styles.input}
+                  value={draft.callout_text ?? ""}
+                  onChange={(e) => setField("callout_text", e.target.value)}
+                  onBlur={handleAutoSave}
+                  placeholder="Short punchy text"
                 />
               </div>
               <div style={mainFieldRowStyle}>
@@ -712,30 +798,51 @@ export default function ProductEditorDrawer({
               </div>
               <div style={mainFieldRowStyle}>
                 <label style={mainFieldLabelStyle}>Temperature</label>
-                <input
+                <select
                   style={styles.input}
                   value={draft.temperature}
                   onChange={(e) => setField("temperature", e.target.value)}
                   onBlur={handleAutoSave}
-                />
+                >
+                  <option value="">Select temperature</option>
+                  {TEMPERATURE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div style={mainFieldRowStyle}>
                 <label style={mainFieldLabelStyle}>Preparation</label>
-                <input
+                <select
                   style={styles.input}
                   value={draft.preparation}
                   onChange={(e) => setField("preparation", e.target.value)}
                   onBlur={handleAutoSave}
-                />
+                >
+                  <option value="">Select preparation</option>
+                  {PREPARATION_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div style={mainFieldRowStyle}>
                 <label style={mainFieldLabelStyle}>Packaging</label>
-                <input
+                <select
                   style={styles.input}
                   value={draft.packaging}
                   onChange={(e) => setField("packaging", e.target.value)}
                   onBlur={handleAutoSave}
-                />
+                >
+                  <option value="">Select packaging</option>
+                  {PACKAGING_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div style={mainFieldRowStyle}>
                 <label style={mainFieldLabelStyle}>Status</label>
@@ -799,6 +906,16 @@ export default function ProductEditorDrawer({
                   value={draft.description}
                   onChange={(e) => setField("description", e.target.value)}
                   onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <label style={styles.label}>Why you will love it</label>
+                <textarea
+                  style={styles.textarea}
+                  value={draft.love_points ?? ""}
+                  onChange={(e) => setField("love_points", e.target.value)}
+                  onBlur={handleAutoSave}
+                  placeholder={"One bullet per line\nRich flavor\nEasy to cook\nGreat for sharing"}
                 />
               </div>
             </div>
@@ -1180,9 +1297,9 @@ const styles: Record<string, React.CSSProperties> = {
     height: 36,
     width: 36,
     borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
+    border: "1px solid rgba(214,74,74,0.46)",
+    background: "rgba(214,74,74,0.14)",
+    color: "#ff6b6b",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",

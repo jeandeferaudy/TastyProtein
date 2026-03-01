@@ -2,6 +2,7 @@ export type CustomerDraft = {
   full_name: string;
   email: string;
   phone: string;
+  placed_for_someone_else: boolean;
   attention_to: string;
   line1: string;
   line2: string;
@@ -28,4 +29,3 @@ export type CheckoutSubmitPayload = {
   express_delivery: boolean;
   add_thermal_bag: boolean;
 };
-
