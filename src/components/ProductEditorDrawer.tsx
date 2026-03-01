@@ -571,7 +571,6 @@ export default function ProductEditorDrawer({
       if (onDeleted) {
         await onDeleted();
       } else {
-        await onSaved();
         onClose();
       }
     } catch (e) {
