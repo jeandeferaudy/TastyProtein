@@ -30,6 +30,8 @@ type Props = {
   editMode: boolean;
   onToggleEditMode: (next: boolean) => void;
   onOpenAllOrders: () => void;
+  onOpenAllCustomers: () => void;
+  onOpenAllPurchases: () => void;
   onOpenAllProducts: () => void;
   onOpenInventory: () => void;
   onOpenAnalytics: () => void;
@@ -60,6 +62,8 @@ export default function Navbar({
   editMode,
   onToggleEditMode,
   onOpenAllOrders,
+  onOpenAllCustomers,
+  onOpenAllPurchases,
   onOpenAllProducts,
   onOpenInventory,
   onOpenAnalytics,
@@ -239,6 +243,28 @@ export default function Navbar({
                         }}
                       >
                         Orders
+                      </button>
+
+                      <button
+                        type="button"
+                        style={styles.menuItem}
+                        onClick={() => {
+                          setAuthMenuOpen(false);
+                          onOpenAllCustomers();
+                        }}
+                      >
+                        Customers
+                      </button>
+
+                      <button
+                        type="button"
+                        style={styles.menuItem}
+                        onClick={() => {
+                          setAuthMenuOpen(false);
+                          onOpenAllPurchases();
+                        }}
+                      >
+                        Purchases
                       </button>
 
                       <button

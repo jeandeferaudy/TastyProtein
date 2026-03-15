@@ -6,6 +6,8 @@ import type { Order } from "@/types/order";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 import { AppButton, RemoveIcon, TOPBAR_FONT_SIZE, UI } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
+import { fallbackDeliveryRule, type DeliveryRule } from "@/lib/deliveryPricing";
+import { calculateSteakCredits, formatCurrencyPHP } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
 const TOPBAR_H = 88; // <-- adjust to match your white bar height (try 80-96)
@@ -15,65 +17,6 @@ const CONTENT_RIGHT_PAD = 24;
 const CHECKOUT_GRID_GAP = 26;
 const CHECKOUT_LEFT_COL_RATIO = 0.275; // 0.55 / (0.55 + 1.45)
 const PROGRESS_RIGHT_TRIM = 12;
-
-type DeliveryRule = {
-  postal_code: string;
-  area_name: string;
-  min_order_free_delivery_php: number;
-  delivery_fee_below_min_php: number;
-};
-
-function fallbackDeliveryRule(postal: string, area: string): DeliveryRule | null {
-  const p = postal.replace(/\D/g, "");
-  const a = area.toLowerCase();
-  if (!p) return null;
-
-  // Near zones
-  if (p === "1709") {
-    return {
-      postal_code: p,
-      area_name: "Merville/Moonwalk",
-      min_order_free_delivery_php: 2000,
-      delivery_fee_below_min_php: 100,
-    };
-  }
-  if (p === "1700") {
-    const near1700 = ["san dionisio", "tambo", "baclaran"];
-    const isNear = near1700.some((k) => a.includes(k));
-    return {
-      postal_code: p,
-      area_name: isNear ? "San Dionisio/Tambo/Baclaran" : "Sucat/Marcelo Green",
-      min_order_free_delivery_php: isNear ? 2000 : 3000,
-      delivery_fee_below_min_php: isNear ? 100 : 150,
-    };
-  }
-  if (p === "1701" || p === "1702") {
-    return {
-      postal_code: p,
-      area_name: "Paranaque near",
-      min_order_free_delivery_php: 2000,
-      delivery_fee_below_min_php: 100,
-    };
-  }
-
-  // Medium zones
-  if (["1711", "1715", "1720"].includes(p) || /^130\d$/.test(p)) {
-    return {
-      postal_code: p,
-      area_name: "Medium zone",
-      min_order_free_delivery_php: 3000,
-      delivery_fee_below_min_php: 150,
-    };
-  }
-
-  // Far zones (default from your pricing model)
-  return {
-    postal_code: p,
-    area_name: "Far zone",
-    min_order_free_delivery_php: 4000,
-    delivery_fee_below_min_php: 200,
-  };
-}
 
 function ordinalDay(n: number): string {
   const v = n % 100;
@@ -117,6 +60,11 @@ type Props = {
   isLoggedIn?: boolean;
   createAccountFromDetails?: boolean;
   setCreateAccountFromDetails?: (next: boolean) => void;
+  createAccountPassword?: string;
+  setCreateAccountPassword?: (next: string) => void;
+  createAccountPasswordConfirm?: string;
+  setCreateAccountPasswordConfirm?: (next: string) => void;
+  createAccountError?: string;
   suggestSaveAddressToProfile?: boolean;
   saveAddressToProfile?: boolean;
   setSaveAddressToProfile?: (next: boolean) => void;
@@ -156,6 +104,11 @@ export default function CheckoutDrawer({
   isLoggedIn = false,
   createAccountFromDetails = false,
   setCreateAccountFromDetails,
+  createAccountPassword = "",
+  setCreateAccountPassword,
+  createAccountPasswordConfirm = "",
+  setCreateAccountPasswordConfirm,
+  createAccountError = "",
   suggestSaveAddressToProfile = false,
   saveAddressToProfile = false,
   setSaveAddressToProfile,
@@ -439,6 +392,16 @@ export default function CheckoutDrawer({
   const hasRecipientCity = customer.city.trim().length > 0;
   const hasRecipientProvince = customer.province.trim().length > 0;
   const hasRecipientPostalCode = customer.postal_code.trim().length > 0;
+  const steakCreditsEstimate = useMemo(
+    () => calculateSteakCredits(computedTotal),
+    [computedTotal]
+  );
+  const wantsAccountCreation =
+    !isLoggedIn && createAccountFromDetails && typeof setCreateAccountFromDetails === "function";
+  const accountPasswordValid = createAccountPassword.trim().length >= 6;
+  const accountPasswordConfirmValid =
+    createAccountPasswordConfirm.trim().length > 0 &&
+    createAccountPassword === createAccountPasswordConfirm;
 
   const isCheckoutValid =
     hasRecipientName &&
@@ -586,7 +549,8 @@ export default function CheckoutDrawer({
     hasRecipientCity &&
     hasRecipientProvince &&
     hasRecipientPostalCode &&
-    postalSupported;
+    postalSupported &&
+    (!wantsAccountCreation || (accountPasswordValid && accountPasswordConfirmValid));
   const isDeliveryComplete =
     customer.delivery_date.trim().length > 0 &&
     customer.delivery_slot.trim().length > 0 &&
@@ -676,6 +640,53 @@ export default function CheckoutDrawer({
   }, [minDeliveryDate]);
 
   if (!isOpen) return null;
+  const gcashPhoneRaw = gcashPhone.trim();
+  const gcashPhoneDisplay = (() => {
+    const digits = gcashPhoneRaw.replace(/\D/g, "");
+    if (digits.length === 11 && digits.startsWith("0")) {
+      return `${digits.slice(0, 1)} ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+    }
+    return gcashPhoneRaw;
+  })();
+
+  const paymentInstructionNode = (
+    <div
+      style={{
+        ...styles.paymentInstructionRow,
+        ...(isMobileViewport ? { fontSize: 15, lineHeight: 1.3, marginBottom: 2 } : null),
+      }}
+    >
+      Scan the QR code, complete your payment, take a screenshot, then upload it below.
+    </div>
+  );
+
+  const gcashLineNode = gcashPhoneRaw ? (
+    <div style={styles.gcashLine}>
+      <span>GCASH to </span>
+      <button
+        type="button"
+        style={styles.gcashNumberBtn}
+        onClick={async () => {
+          const number = gcashPhoneRaw;
+          if (!number) return;
+          try {
+            await navigator.clipboard.writeText(number);
+            setCopyNoticeVisible(true);
+          } catch {
+            // Clipboard may fail without secure context; keep silent.
+          }
+        }}
+        title="Copy GCash number"
+      >
+        <span>{gcashPhoneDisplay}</span>
+        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" aria-hidden>
+          <rect x="7" y="3" width="10" height="10" rx="2.1" stroke="currentColor" strokeWidth="1.7" />
+          <rect x="4" y="6" width="10" height="10" rx="2.1" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
+      </button>
+      {copyNoticeVisible ? <span style={styles.copyNotice}>Copied</span> : null}
+    </div>
+  ) : null;
 
   const paymentSection = (
     <div style={styles.paymentBlock}>
@@ -691,13 +702,18 @@ export default function CheckoutDrawer({
             : null),
         }}
       >
+        {isMobileViewport ? paymentInstructionNode : null}
         <div
           style={{
             ...styles.qrLeft,
             ...(isMobileViewport
               ? {
                   display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
                   justifyContent: "center",
+                  gap: 10,
+                  width: "100%",
                 }
               : {
                   marginLeft: 10,
@@ -737,29 +753,7 @@ export default function CheckoutDrawer({
               <rect x="112" y="132" width="12" height="12" fill="#000" />
             </svg>
           )}
-          {gcashPhone.trim() ? (
-            <div style={styles.gcashLine}>
-              <span>GCASH to </span>
-              <button
-                type="button"
-                style={styles.gcashNumberBtn}
-                onClick={async () => {
-                  const number = gcashPhone.trim();
-                  if (!number) return;
-                  try {
-                    await navigator.clipboard.writeText(number);
-                    setCopyNoticeVisible(true);
-                  } catch {
-                    // Clipboard may fail without secure context; keep silent.
-                  }
-                }}
-                title="Copy GCash number"
-              >
-                {gcashPhone.trim()}
-              </button>
-              {copyNoticeVisible ? <span style={styles.copyNotice}>Copied</span> : null}
-            </div>
-          ) : null}
+          {gcashLineNode}
         </div>
 
         <div
@@ -774,15 +768,16 @@ export default function CheckoutDrawer({
               : null),
           }}
         >
+          {!isMobileViewport ? paymentInstructionNode : null}
           <div
-            style={{
-              ...styles.paymentInstructionRow,
-              ...(isMobileViewport ? { fontSize: 15, lineHeight: 1.3, marginBottom: 2 } : null),
-            }}
+            style={
+              isMobileViewport
+                ? { ...styles.qrAmount, ...styles.qrAmountMobile }
+                : styles.qrAmount
+            }
           >
-            Scan the QR code, complete your payment, take a screenshot, then upload it below.
+            ₱ {formatMoney(grandTotal)}
           </div>
-          <div style={styles.qrAmount}>₱ {formatMoney(grandTotal)}</div>
           <div style={{ ...styles.uploadBlock, ...(isMobileViewport ? styles.uploadBlockMobile : null) }}>
             <label
               style={{
@@ -1035,6 +1030,11 @@ export default function CheckoutDrawer({
                       ₱ {formatMoney(displayedTotal)}
                     </div>
                   </div>
+                  {isLoggedIn ? (
+                    <div style={{ ...styles.steakCreditsSummary, ...styles.summaryIndentedBlock }}>
+                      This order earns you {formatCurrencyPHP(steakCreditsEstimate)} in Steak Credits.
+                    </div>
+                  ) : null}
 
                   {checkoutStep === 3 && postalSupported && deliveryFee > 0 ? (
                     <div style={{ ...styles.deliveryHint, ...styles.summaryIndentedBlock }}>
@@ -1048,7 +1048,7 @@ export default function CheckoutDrawer({
                       Postal code not yet covered for delivery.
                     </div>
                   ) : null}
-                  {checkoutStep > 1 ? (
+                  {checkoutStep > 2 ? (
                     <div style={styles.summaryLogisticsMini}>
                       <div style={{ ...styles.summaryMiniTitle, marginTop: 0 }}>CUSTOMER</div>
                       <div style={styles.summaryDetailsGap} />
@@ -1302,6 +1302,7 @@ export default function CheckoutDrawer({
                       setCustomer({ ...customer, full_name: e.target.value })
                     }
                     placeholder="e.g. Juan Dela Cruz"
+                    autoComplete="name"
                   />
                 </div>
 
@@ -1315,6 +1316,7 @@ export default function CheckoutDrawer({
                     value={customer.email}
                     onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
                     placeholder="e.g. juan@email.com"
+                    autoComplete="email"
                   />
                 </div>
 
@@ -1328,6 +1330,7 @@ export default function CheckoutDrawer({
                     value={customer.phone}
                     onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
                     placeholder="e.g. 09xx xxx xxxx"
+                    autoComplete="tel"
                   />
                 </div>
 
@@ -1401,18 +1404,21 @@ export default function CheckoutDrawer({
                         setCustomer({ ...customer, attention_to: e.target.value })
                       }
                       placeholder="Attention to (optional)"
+                      autoComplete="shipping organization"
                     />
                     <input
                       style={{ ...styles.input, marginTop: 8 }}
                       value={customer.line1}
                       onChange={(e) => setCustomer({ ...customer, line1: e.target.value })}
                       placeholder="Line 1 (house #, street)"
+                      autoComplete="shipping address-line1"
                     />
                     <input
                       style={{ ...styles.input, marginTop: 8 }}
                       value={customer.line2}
                       onChange={(e) => setCustomer({ ...customer, line2: e.target.value })}
                       placeholder="Line 2 (optional)"
+                      autoComplete="shipping address-line2"
                     />
                     <div style={styles.row2}>
                       <input
@@ -1420,12 +1426,14 @@ export default function CheckoutDrawer({
                         value={customer.barangay}
                         onChange={(e) => setCustomer({ ...customer, barangay: e.target.value })}
                         placeholder="Barangay"
+                        autoComplete="shipping address-level3"
                       />
                       <input
                         style={styles.input}
                         value={customer.city}
                         onChange={(e) => setCustomer({ ...customer, city: e.target.value })}
                         placeholder="City"
+                        autoComplete="shipping address-level2"
                       />
                     </div>
                     <div style={styles.row2}>
@@ -1434,6 +1442,7 @@ export default function CheckoutDrawer({
                         value={customer.province}
                         onChange={(e) => setCustomer({ ...customer, province: e.target.value })}
                         placeholder="Province"
+                        autoComplete="shipping address-level1"
                       />
                       <input
                         style={styles.input}
@@ -1442,6 +1451,7 @@ export default function CheckoutDrawer({
                           setCustomer({ ...customer, postal_code: e.target.value })
                         }
                         placeholder="Postal code"
+                        autoComplete="shipping postal-code"
                       />
                     </div>
                     <input
@@ -1471,17 +1481,52 @@ export default function CheckoutDrawer({
                 </div>
 
 	                {!isLoggedIn && setCreateAccountFromDetails ? (
-                  <label style={styles.optInRow}>
-                    <input
-                      type="checkbox"
-                      style={styles.checkoutCheckbox}
-                      checked={createAccountFromDetails}
-                      onChange={(e) => setCreateAccountFromDetails(e.target.checked)}
-                    />
-                    <span>
-                      Use my details to create an account and save for next time
-                    </span>
-                  </label>
+                  <div style={styles.steakCreditsBox}>
+                    <div style={styles.steakCreditsBoxTitle}>Earn Steak Credits</div>
+                    <label style={{ ...styles.optInRow, marginTop: 6, alignItems: "flex-start" }}>
+                      <input
+                        type="checkbox"
+                        style={{ ...styles.checkoutCheckbox, marginTop: 3 }}
+                        checked={createAccountFromDetails}
+                        onChange={(e) => setCreateAccountFromDetails(e.target.checked)}
+                      />
+                      <span style={styles.steakCreditsBoxBody}>
+                        Create an account and instantly earn 5% of your spending in Steak Credits for your next order.
+                      </span>
+                    </label>
+                    <div style={styles.steakCreditsBoxEstimate}>
+                      You will earn {formatCurrencyPHP(steakCreditsEstimate)} in Steak Credits on this order.
+                    </div>
+                    {createAccountFromDetails ? (
+                      <div style={styles.accountFieldsGrid}>
+                        <input
+                          style={styles.input}
+                          type="password"
+                          value={createAccountPassword}
+                          onChange={(e) => setCreateAccountPassword?.(e.target.value)}
+                          placeholder="Create password"
+                          autoComplete="new-password"
+                        />
+                        <input
+                          style={styles.input}
+                          type="password"
+                          value={createAccountPasswordConfirm}
+                          onChange={(e) => setCreateAccountPasswordConfirm?.(e.target.value)}
+                          placeholder="Confirm password"
+                          autoComplete="new-password"
+                        />
+                        {createAccountError ? (
+                          <div style={styles.accountError}>{createAccountError}</div>
+                        ) : !accountPasswordValid ? (
+                          <div style={styles.accountHint}>Password must be at least 6 characters.</div>
+                        ) : !accountPasswordConfirmValid ? (
+                          <div style={styles.accountHint}>Passwords must match.</div>
+                        ) : (
+                          <div style={styles.accountHint}>Your order will be linked to your new account.</div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
                 {isLoggedIn && suggestSaveAddressToProfile && setSaveAddressToProfile ? (
                   <label style={styles.optInRow}>
@@ -2221,6 +2266,55 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "scale(1.2)",
     transformOrigin: "center",
   },
+  steakCreditsSummary: {
+    marginTop: 10,
+    marginBottom: 2,
+    fontSize: 15,
+    lineHeight: 1.45,
+    color: "var(--tp-accent)",
+    fontWeight: 700,
+  },
+  steakCreditsBox: {
+    marginTop: 12,
+    border: "1px solid var(--tp-border-color-soft)",
+    borderRadius: 12,
+    padding: 12,
+    background: "rgba(255,255,255,0.02)",
+  },
+  steakCreditsBoxTitle: {
+    fontSize: 15,
+    fontWeight: 800,
+    letterSpacing: 0.3,
+    color: "var(--tp-text-color)",
+  },
+  steakCreditsBoxBody: {
+    display: "block",
+    fontSize: 15,
+    lineHeight: 1.45,
+    opacity: 0.92,
+  },
+  steakCreditsBoxEstimate: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 1.4,
+    color: "var(--tp-accent)",
+    fontWeight: 700,
+  },
+  accountFieldsGrid: {
+    display: "grid",
+    gap: 8,
+    marginTop: 10,
+  },
+  accountHint: {
+    fontSize: 13,
+    lineHeight: 1.4,
+    opacity: 0.75,
+  },
+  accountError: {
+    fontSize: 13,
+    lineHeight: 1.4,
+    color: "#ff9f9f",
+  },
 
   uploadBlock: {
     marginTop: 4,
@@ -2812,6 +2906,9 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontSize: 15,
     fontWeight: 700,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
   },
   copyNotice: {
     marginLeft: 5,
@@ -2822,6 +2919,11 @@ const styles: Record<string, React.CSSProperties> = {
 
   qrText: { fontSize: 15, opacity: 0.95, lineHeight: 1.25, fontWeight: 700 },
   qrAmount: { fontSize: 25, opacity: 1, fontWeight: 900, lineHeight: 1.1 },
+  qrAmountMobile: {
+    fontSize: 20,
+    width: "100%",
+    textAlign: "center",
+  },
   previewBackdrop: {
     position: "absolute",
     inset: 0,

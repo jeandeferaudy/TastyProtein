@@ -17,6 +17,11 @@ type Props = {
   backgroundStyle?: React.CSSProperties;
   onChangeStatuses?: (orderId: string, patch: OrderStatusPatch) => Promise<void> | void;
   onChangePackedQty?: (orderLineId: string, packedQty: number | null) => Promise<void> | void;
+  onChangeUnitPrice?: (
+    orderId: string,
+    orderLineId: string,
+    unitPrice: number | null
+  ) => Promise<void> | void;
   onChangeAmountPaid?: (orderId: string, amountPaid: number | null) => Promise<void> | void;
   onChangePaymentProof?: (
     orderId: string,
@@ -87,9 +92,9 @@ function statusTone(value: string): React.CSSProperties {
   }
   if (v === "processed" || v === "packed" || v === "in progress" || v === "submitted") {
     return {
-      color: "#2f99d6",
-      borderColor: "rgba(102,199,255,0.72)",
-      background: "rgba(102,199,255,0.24)",
+      color: "#c38a28",
+      borderColor: "rgba(255,207,122,0.76)",
+      background: "rgba(255,207,122,0.26)",
     };
   }
   return {
@@ -125,6 +130,7 @@ export default function OrderDrawer({
   backgroundStyle,
   onChangeStatuses,
   onChangePackedQty,
+  onChangeUnitPrice,
   onChangeAmountPaid,
   onChangePaymentProof,
   onChangeAdminFields,
@@ -137,6 +143,7 @@ export default function OrderDrawer({
     delivery_status: "unpacked",
   });
   const [packedDraftById, setPackedDraftById] = React.useState<Record<string, string>>({});
+  const [unitPriceDraftById, setUnitPriceDraftById] = React.useState<Record<string, string>>({});
   const [amountPaidDraft, setAmountPaidDraft] = React.useState("");
   const [savingStatus, setSavingStatus] = React.useState(false);
   const [savingPacked, setSavingPacked] = React.useState<Record<string, boolean>>({});
@@ -150,6 +157,8 @@ export default function OrderDrawer({
   const [addLineSearch, setAddLineSearch] = React.useState("");
   const [addQtyByProduct, setAddQtyByProduct] = React.useState<Record<string, number>>({});
   const [savingAddLines, setSavingAddLines] = React.useState(false);
+  const [savedPulseByKey, setSavedPulseByKey] = React.useState<Record<string, boolean>>({});
+  const savedPulseTimersRef = React.useRef<Record<string, number>>({});
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const [adminDraft, setAdminDraft] = React.useState({
     created_at: "",
@@ -172,6 +181,29 @@ export default function OrderDrawer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const pulseSaved = React.useCallback((key: string) => {
+    if (!key) return;
+    const existing = savedPulseTimersRef.current[key];
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+    setSavedPulseByKey((prev) => ({ ...prev, [key]: true }));
+    savedPulseTimersRef.current[key] = window.setTimeout(() => {
+      setSavedPulseByKey((prev) => ({ ...prev, [key]: false }));
+      delete savedPulseTimersRef.current[key];
+    }, 900);
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      for (const id of Object.values(savedPulseTimersRef.current)) {
+        window.clearTimeout(id);
+      }
+      savedPulseTimersRef.current = {};
+    },
+    []
+  );
+
   React.useEffect(() => {
     if (!detail) return;
     const initialPaidStatus =
@@ -184,11 +216,14 @@ export default function OrderDrawer({
       delivery_status: String(detail.delivery_status || "unpacked"),
     });
     const nextPacked: Record<string, string> = {};
+    const nextUnitPrice: Record<string, string> = {};
     for (const line of detail.items) {
       nextPacked[line.id] =
         line.packed_qty === null || line.packed_qty === undefined ? "" : String(line.packed_qty);
+      nextUnitPrice[line.id] = String(line.unit_price ?? 0);
     }
     setPackedDraftById(nextPacked);
+    setUnitPriceDraftById(nextUnitPrice);
     setAmountPaidDraft(String(detail.amount_paid ?? 0));
     setAdminDraft({
       created_at: detail.created_at ? String(detail.created_at).slice(0, 10) : "",
@@ -230,6 +265,7 @@ export default function OrderDrawer({
       setSavingPacked((prev) => ({ ...prev, [lineId]: true }));
       try {
         await onChangePackedQty(lineId, next);
+        pulseSaved(`packed:${lineId}`);
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save packed quantity.";
@@ -239,7 +275,25 @@ export default function OrderDrawer({
         setSavingPacked((prev) => ({ ...prev, [lineId]: false }));
       }
     },
-    [onChangePackedQty, packedDraftById]
+    [onChangePackedQty, packedDraftById, pulseSaved]
+  );
+
+  const saveUnitPrice = React.useCallback(
+    async (lineId: string) => {
+      if (!detail || !onChangeUnitPrice) return;
+      const raw = unitPriceDraftById[lineId];
+      const next = raw === "" ? 0 : Number(raw);
+      if (Number.isNaN(next)) return;
+      try {
+        await onChangeUnitPrice(detail.id, lineId, Math.max(0, next));
+        pulseSaved(`unit_price:${lineId}`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save unit price.";
+        alert(msg);
+        console.error("Failed to save unit price", e);
+      }
+    },
+    [detail, onChangeUnitPrice, pulseSaved, unitPriceDraftById]
   );
 
   const saveAmountPaid = React.useCallback(async () => {
@@ -250,6 +304,7 @@ export default function OrderDrawer({
     setSavingAmountPaid(true);
     try {
       await onChangeAmountPaid(detail.id, next === null ? null : Math.max(0, next));
+      pulseSaved("amount_paid");
     } catch (e) {
       const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save amount paid.";
       alert(msg);
@@ -257,7 +312,7 @@ export default function OrderDrawer({
     } finally {
       setSavingAmountPaid(false);
     }
-  }, [amountPaidDraft, detail, onChangeAmountPaid]);
+  }, [amountPaidDraft, detail, onChangeAmountPaid, pulseSaved]);
 
   const savePaymentProof = React.useCallback(
     async (file: File | null) => {
@@ -273,11 +328,16 @@ export default function OrderDrawer({
   );
 
   const saveAdminFields = React.useCallback(
-    async (patch: OrderAdminPatch) => {
+    async (patch: OrderAdminPatch, savedKeys?: string | string[]) => {
       if (!detail || !onChangeAdminFields) return;
       setSavingAdminFields(true);
       try {
         await onChangeAdminFields(detail.id, patch);
+        if (savedKeys) {
+          for (const key of Array.isArray(savedKeys) ? savedKeys : [savedKeys]) {
+            pulseSaved(key);
+          }
+        }
       } catch (e) {
         const msg =
           e instanceof Error ? e.message : typeof e === "string" ? e : "Failed to save order details.";
@@ -287,7 +347,7 @@ export default function OrderDrawer({
         setSavingAdminFields(false);
       }
     },
-    [detail, onChangeAdminFields]
+    [detail, onChangeAdminFields, pulseSaved]
   );
 
   const proofFileName = React.useMemo(() => {
@@ -435,222 +495,469 @@ export default function OrderDrawer({
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
   const orderNo = detail ? detail.order_number ?? orderNumber8(detail.id) : "—";
-  const statusKey = String(statusDraft.status || "").toLowerCase();
-  const headerSuffix =
-    statusKey === "submitted" || statusKey === "draft" ? " WAITING TO BE PACKED" : "";
   const showPackedColumn = true;
   const itemGridTemplate = "1fr 84px 90px 108px";
+  const statusControls = !loading && detail ? (
+    <>
+      <div style={styles.statusField}>
+        <div style={styles.statusLabel}>STATUS</div>
+        {canEdit ? (
+          <select
+            value={statusDraft.status}
+            disabled={savingStatus}
+            onChange={(e) => {
+              const value = e.target.value;
+              setStatusDraft((prev) => ({ ...prev, status: value }));
+              void saveStatusPatch({ status: value });
+            }}
+            style={{ ...styles.statusSelect, ...statusTone(statusDraft.status) }}
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div style={{ ...styles.statusChip, ...statusTone(statusDraft.status) }}>
+            {statusDraft.status}
+          </div>
+        )}
+      </div>
+      <div style={styles.statusField}>
+        <div style={styles.statusLabel}>PAYMENT</div>
+        {canEdit ? (
+          <select
+            value={statusDraft.paid_status}
+            disabled={savingStatus}
+            onChange={(e) => {
+              const value = e.target.value;
+              setStatusDraft((prev) => ({ ...prev, paid_status: value }));
+              void saveStatusPatch({ paid_status: value });
+            }}
+            style={{ ...styles.statusSelect, ...statusTone(statusDraft.paid_status) }}
+          >
+            {PAYMENT_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div style={{ ...styles.statusChip, ...statusTone(statusDraft.paid_status) }}>
+            {statusDraft.paid_status}
+          </div>
+        )}
+      </div>
+      <div style={styles.statusField}>
+        <div style={styles.statusLabel}>DELIVERY</div>
+        {canEdit ? (
+          <select
+            value={statusDraft.delivery_status}
+            disabled={savingStatus}
+            onChange={(e) => {
+              const value = e.target.value;
+              setStatusDraft((prev) => ({ ...prev, delivery_status: value }));
+              void saveStatusPatch({ delivery_status: value });
+            }}
+            style={{ ...styles.statusSelect, ...statusTone(statusDraft.delivery_status) }}
+          >
+            {DELIVERY_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div style={{ ...styles.statusChip, ...statusTone(statusDraft.delivery_status) }}>
+            {statusDraft.delivery_status}
+          </div>
+        )}
+      </div>
+    </>
+  ) : null;
 
   return (
     <>
       <div style={{ ...styles.backdrop, ...(backgroundStyle ?? null), top: panelTop, height: panelHeight }} />
       <aside className="tp-drawer-slide-up" style={{ ...styles.panel, ...(backgroundStyle ?? null), top: panelTop, height: panelHeight }}>
-        <div style={styles.topRow}>
-          <AppButton variant="ghost" style={styles.backBtn} onClick={onBack}>
-            BACK
-          </AppButton>
-          <div style={styles.title}>
-            ORDER #{orderNo}
-            {headerSuffix ? <span style={styles.titleStatusSuffix}>{headerSuffix}</span> : null}
-          </div>
-          {!loading && detail ? (
-            <div style={styles.statusGroup}>
-              <div style={styles.statusField}>
-                <div style={styles.statusLabel}>STATUS</div>
-                {canEdit ? (
-                  <select
-                    value={statusDraft.status}
-                    disabled={savingStatus}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setStatusDraft((prev) => ({ ...prev, status: value }));
-                      void saveStatusPatch({ status: value });
-                    }}
-                    style={{ ...styles.statusSelect, ...statusTone(statusDraft.status) }}
-                  >
-                    {STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div style={{ ...styles.statusChip, ...statusTone(statusDraft.status) }}>
-                    {statusDraft.status}
-                  </div>
-                )}
-              </div>
-              <div style={styles.statusField}>
-                <div style={styles.statusLabel}>PAYMENT</div>
-                {canEdit ? (
-                  <select
-                    value={statusDraft.paid_status}
-                    disabled={savingStatus}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setStatusDraft((prev) => ({ ...prev, paid_status: value }));
-                      void saveStatusPatch({ paid_status: value });
-                    }}
-                    style={{ ...styles.statusSelect, ...statusTone(statusDraft.paid_status) }}
-                  >
-                    {PAYMENT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div style={{ ...styles.statusChip, ...statusTone(statusDraft.paid_status) }}>
-                    {statusDraft.paid_status}
-                  </div>
-                )}
-              </div>
-              <div style={styles.statusField}>
-                <div style={styles.statusLabel}>DELIVERY</div>
-                {canEdit ? (
-                  <select
-                    value={statusDraft.delivery_status}
-                    disabled={savingStatus}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setStatusDraft((prev) => ({ ...prev, delivery_status: value }));
-                      void saveStatusPatch({ delivery_status: value });
-                    }}
-                    style={{ ...styles.statusSelect, ...statusTone(statusDraft.delivery_status) }}
-                  >
-                    {DELIVERY_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div style={{ ...styles.statusChip, ...statusTone(statusDraft.delivery_status) }}>
-                    {statusDraft.delivery_status}
-                  </div>
-                )}
+        <div style={isMobileViewport ? { ...styles.topRow, ...styles.topRowMobile } : styles.topRow}>
+          {isMobileViewport ? (
+            <div style={styles.mobileHeaderStack}>
+              <div style={styles.mobileHeaderMainRow}>
+                <AppButton variant="ghost" style={styles.backBtn} onClick={onBack}>
+                  BACK
+                </AppButton>
+                <div style={styles.title}>ORDER #{orderNo}</div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <AppButton variant="ghost" style={styles.backBtn} onClick={onBack}>
+                BACK
+              </AppButton>
+              <div style={styles.title}>ORDER #{orderNo}</div>
+              {statusControls ? <div style={styles.statusGroup}>{statusControls}</div> : null}
+            </>
+          )}
         </div>
 
         <div
           style={{
             ...styles.content,
-            ...(isMobileViewport ? { padding: "8px 10px 20px" } : null),
+            ...(isMobileViewport
+              ? {
+                  padding: "8px 10px 20px",
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                }
+              : null),
           }}
         >
           {loading ? <div style={styles.hint}>Loading order details...</div> : null}
           {!loading && !detail ? <div style={styles.hint}>Order not found.</div> : null}
 
           {!loading && detail ? (
-            <div style={styles.sectionGrid}>
-              {noticeText ? <div style={styles.publicNotice}>{noticeText}</div> : null}
-              <section style={styles.leftCol}>
+            <>
+              {isMobileViewport ? (
+                <section style={styles.mobileStatusCard}>
+                  <div style={styles.statusFieldMobile}>
+                    <div style={styles.statusLabel}>STATUS</div>
+                    {canEdit ? (
+                      <select
+                        value={statusDraft.status}
+                        disabled={savingStatus}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setStatusDraft((prev) => ({ ...prev, status: value }));
+                          void saveStatusPatch({ status: value });
+                        }}
+                        style={{ ...styles.statusSelect, ...styles.statusSelectMobile, ...statusTone(statusDraft.status) }}
+                      >
+                        {STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ ...styles.statusChip, ...styles.statusChipMobile, ...statusTone(statusDraft.status) }}>
+                        {statusDraft.status}
+                      </div>
+                    )}
+                  </div>
+                  <div style={styles.statusFieldMobile}>
+                    <div style={styles.statusLabel}>PAYMENT</div>
+                    {canEdit ? (
+                      <select
+                        value={statusDraft.paid_status}
+                        disabled={savingStatus}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setStatusDraft((prev) => ({ ...prev, paid_status: value }));
+                          void saveStatusPatch({ paid_status: value });
+                        }}
+                        style={{ ...styles.statusSelect, ...styles.statusSelectMobile, ...statusTone(statusDraft.paid_status) }}
+                      >
+                        {PAYMENT_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ ...styles.statusChip, ...styles.statusChipMobile, ...statusTone(statusDraft.paid_status) }}>
+                        {statusDraft.paid_status}
+                      </div>
+                    )}
+                  </div>
+                  <div style={styles.statusFieldMobile}>
+                    <div style={styles.statusLabel}>DELIVERY</div>
+                    {canEdit ? (
+                      <select
+                        value={statusDraft.delivery_status}
+                        disabled={savingStatus}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setStatusDraft((prev) => ({ ...prev, delivery_status: value }));
+                          void saveStatusPatch({ delivery_status: value });
+                        }}
+                        style={{ ...styles.statusSelect, ...styles.statusSelectMobile, ...statusTone(statusDraft.delivery_status) }}
+                      >
+                        {DELIVERY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ ...styles.statusChip, ...styles.statusChipMobile, ...statusTone(statusDraft.delivery_status) }}>
+                        {statusDraft.delivery_status}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              ) : null}
+              <div
+                style={
+                  isMobileViewport
+                    ? { ...styles.sectionGrid, ...styles.sectionGridMobile }
+                    : styles.sectionGrid
+                }
+              >
+                {noticeText ? <div style={styles.publicNotice}>{noticeText}</div> : null}
+                <section
+                  style={
+                    isMobileViewport
+                      ? { ...styles.leftCol, ...styles.leftColMobile }
+                      : styles.leftCol
+                  }
+                >
                 <div style={styles.sectionTitle}>CART</div>
-                <div style={styles.itemListScroll}>
-                  <div style={{ ...styles.itemHeadRow, gridTemplateColumns: itemGridTemplate }}>
-                    <div />
-                    <div style={styles.itemHeadCell}>ORDERED</div>
-                    <div style={styles.itemHeadCell}>PACKED</div>
-                    <div style={styles.itemHeadCell}>TOTAL</div>
-                  </div>
-                  {sortedItems.map((it) => (
-                    <div key={it.id} style={{ ...styles.itemRow, gridTemplateColumns: itemGridTemplate }}>
-                      <div>
-                        <div style={styles.itemName}>{it.name}</div>
-                        <div style={styles.itemMeta}>
-                          {[it.size, it.temperature].filter(Boolean).join(" • ") || "—"}
-                        </div>
-                        {it.added_by_admin ? (
-                          <div style={styles.adminAddedText}>added by admin</div>
-                        ) : null}
-                        <div style={styles.itemMeta}>₱ {fmtMoney(it.unit_price)} / pc</div>
-                      </div>
-                      <div style={styles.itemQty}>{it.qty}</div>
-                      <div style={styles.itemPackedCell}>
-                        {canEdit ? (
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={packedDraftById[it.id] ?? ""}
-                            onChange={(e) =>
-                              setPackedDraftById((prev) => ({
-                                ...prev,
-                                [it.id]: e.target.value,
-                              }))
-                            }
-                            onBlur={() => {
-                              void savePackedQty(it.id);
-                            }}
-                            style={{
-                              ...styles.packedInput,
-                              ...packedTone(packedDraftById[it.id], Number(it.qty ?? 0)),
-                            }}
-                          />
-                        ) : (
-                          <div style={styles.packedReadOnly}>
-                            {packedDraftById[it.id] === "" ? "—" : packedDraftById[it.id]}
+                {isMobileViewport ? (
+                  <>
+                    <div style={styles.itemListMobile}>
+                      {sortedItems.map((it) => (
+                        <div key={it.id} style={styles.itemCardMobile}>
+                          <div style={styles.itemName}>{it.name}</div>
+                          <div style={styles.itemMeta}>
+                            {[it.size, it.temperature].filter(Boolean).join(" • ") || "—"}
                           </div>
-                        )}
-                        {canEdit && savingPacked[it.id] ? <div style={styles.savingTiny}>saving...</div> : null}
-                      </div>
-                      <div style={styles.itemTotal}>₱ {fmtMoney(it.line_total)}</div>
+                          {it.added_by_admin ? (
+                            <div style={styles.adminAddedText}>added by admin</div>
+                          ) : null}
+                          {canEdit ? (
+                            <div style={styles.metaInputRow}>
+                              <span style={styles.metaInputPrefix}>₱</span>
+                              <div style={styles.inputWithCheck}>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={unitPriceDraftById[it.id] ?? ""}
+                                  onChange={(e) =>
+                                    setUnitPriceDraftById((prev) => ({
+                                      ...prev,
+                                      [it.id]: e.target.value,
+                                    }))
+                                  }
+                                  onBlur={() => {
+                                    void saveUnitPrice(it.id);
+                                  }}
+                                  style={{ ...styles.inlinePriceInput, ...styles.inputWithCheckPadding }}
+                                />
+                                {savedPulseByKey[`unit_price:${it.id}`] ? <span style={styles.savedCheck}>✓</span> : null}
+                              </div>
+                              <span style={styles.metaInputSuffix}>/ pc</span>
+                            </div>
+                          ) : (
+                            <div style={styles.itemMeta}>₱ {fmtMoney(it.unit_price)} / pc</div>
+                          )}
+                          <div style={styles.itemStatsMobile}>
+                            <div style={styles.itemStatCellMobile}>
+                              <div style={styles.itemStatLabelMobile}>Ordered</div>
+                              <div style={styles.itemStatValueMobile}>{it.qty}</div>
+                            </div>
+                            <div style={styles.itemStatCellMobile}>
+                              <div style={styles.itemStatLabelMobile}>Packed</div>
+                              {canEdit ? (
+                                <div style={styles.inputWithCheck}>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={packedDraftById[it.id] ?? ""}
+                                    onChange={(e) =>
+                                      setPackedDraftById((prev) => ({
+                                        ...prev,
+                                        [it.id]: e.target.value,
+                                      }))
+                                    }
+                                    onBlur={() => {
+                                      void savePackedQty(it.id);
+                                    }}
+                                    style={{
+                                      ...styles.packedInput,
+                                      ...styles.inputWithCheckPadding,
+                                      ...packedTone(packedDraftById[it.id], Number(it.qty ?? 0)),
+                                    }}
+                                  />
+                                  {savedPulseByKey[`packed:${it.id}`] ? <span style={styles.savedCheck}>✓</span> : null}
+                                </div>
+                              ) : (
+                                <div style={styles.itemStatValueMobile}>
+                                  {packedDraftById[it.id] === "" ? "—" : packedDraftById[it.id]}
+                                </div>
+                              )}
+                            </div>
+                            <div style={styles.itemStatCellMobile}>
+                              <div style={styles.itemStatLabelMobile}>Total</div>
+                              <div style={styles.itemStatValueMobile}>₱ {fmtMoney(it.line_total)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
 
-                <div style={styles.totalBlock}>
-                  <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
-                    <span>Subtotal</span>
-                    <strong style={styles.totalQtyCell}>{totalUnits}</strong>
-                    <strong style={styles.totalPickedCell}>{totalPickedUnits}</strong>
-                    <strong
-                      style={{
-                        ...styles.totalValueCell,
-                        gridColumn: 4,
-                      }}
-                    >
-                      ₱ {fmtMoney(detail.subtotal)}
-                    </strong>
-                  </div>
-                  <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
-                    <span>Delivery</span>
-                    <strong
-                      style={{
-                        ...styles.totalValueCell,
-                        gridColumn: 4,
-                      }}
-                    >
-                      {Number(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee) > 0
-                        ? `₱ ${fmtMoney(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee)}`
-                        : "FREE"}
-                    </strong>
-                  </div>
-                  <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
-                    <span>{detail.thermal_bag_fee > 0 ? "Thermal bag" : "Standard bag"}</span>
-                    <strong
-                      style={{
-                        ...styles.totalValueCell,
-                        gridColumn: 4,
-                        ...(detail.thermal_bag_fee > 0 ? styles.adminHighlight : null),
-                      }}
-                    >
-                      {detail.thermal_bag_fee > 0 ? `₱ ${fmtMoney(detail.thermal_bag_fee)}` : "FREE"}
-                    </strong>
-                  </div>
-                  <div style={{ ...styles.totalGridRow, ...styles.totalStrong, gridTemplateColumns: itemGridTemplate }}>
-                    <span>Total</span>
-                    <strong
-                      style={{
-                        ...styles.totalValueCell,
-                        gridColumn: 4,
-                      }}
-                    >
-                      ₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}
-                    </strong>
-                  </div>
-                </div>
+                    <div style={styles.totalBlockMobile}>
+                      <div style={styles.totalRowMobile}>
+                        <span>Subtotal</span>
+                        <span>{totalUnits} / {totalPickedUnits}</span>
+                        <strong>₱ {fmtMoney(detail.subtotal)}</strong>
+                      </div>
+                      <div style={styles.totalRowMobile}>
+                        <span>Delivery</span>
+                        <strong>
+                          {Number(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee) > 0
+                            ? `₱ ${fmtMoney(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee)}`
+                            : "FREE"}
+                        </strong>
+                      </div>
+                      <div style={styles.totalRowMobile}>
+                        <span>{detail.thermal_bag_fee > 0 ? "Thermal bag" : "Standard bag"}</span>
+                        <strong style={detail.thermal_bag_fee > 0 ? styles.adminHighlight : undefined}>
+                          {detail.thermal_bag_fee > 0 ? `₱ ${fmtMoney(detail.thermal_bag_fee)}` : "FREE"}
+                        </strong>
+                      </div>
+                      <div style={{ ...styles.totalRowMobile, ...styles.totalStrongMobile }}>
+                        <span>Total</span>
+                        <strong>₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}</strong>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={styles.itemListScroll}>
+                      <div style={{ ...styles.itemHeadRow, gridTemplateColumns: itemGridTemplate }}>
+                        <div />
+                        <div style={styles.itemHeadCell}>ORDERED</div>
+                        <div style={styles.itemHeadCell}>PACKED</div>
+                        <div style={styles.itemHeadCell}>TOTAL</div>
+                      </div>
+                      {sortedItems.map((it) => (
+                        <div key={it.id} style={{ ...styles.itemRow, gridTemplateColumns: itemGridTemplate }}>
+                          <div>
+                            <div style={styles.itemName}>{it.name}</div>
+                            <div style={styles.itemMeta}>
+                              {[it.size, it.temperature].filter(Boolean).join(" • ") || "—"}
+                            </div>
+                            {it.added_by_admin ? (
+                              <div style={styles.adminAddedText}>added by admin</div>
+                            ) : null}
+                            {canEdit ? (
+                              <div style={styles.metaInputRow}>
+                                <span style={styles.metaInputPrefix}>₱</span>
+                                <div style={styles.inputWithCheck}>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={unitPriceDraftById[it.id] ?? ""}
+                                    onChange={(e) =>
+                                      setUnitPriceDraftById((prev) => ({
+                                        ...prev,
+                                        [it.id]: e.target.value,
+                                      }))
+                                    }
+                                    onBlur={() => {
+                                      void saveUnitPrice(it.id);
+                                    }}
+                                    style={{ ...styles.inlinePriceInput, ...styles.inputWithCheckPadding }}
+                                  />
+                                  {savedPulseByKey[`unit_price:${it.id}`] ? <span style={styles.savedCheck}>✓</span> : null}
+                                </div>
+                                <span style={styles.metaInputSuffix}>/ pc</span>
+                              </div>
+                            ) : (
+                              <div style={styles.itemMeta}>₱ {fmtMoney(it.unit_price)} / pc</div>
+                            )}
+                          </div>
+                          <div style={styles.itemQty}>{it.qty}</div>
+                          <div style={styles.itemPackedCell}>
+                            {canEdit ? (
+                              <div style={styles.inputWithCheck}>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={packedDraftById[it.id] ?? ""}
+                                  onChange={(e) =>
+                                    setPackedDraftById((prev) => ({
+                                      ...prev,
+                                      [it.id]: e.target.value,
+                                    }))
+                                  }
+                                  onBlur={() => {
+                                    void savePackedQty(it.id);
+                                  }}
+                                  style={{
+                                    ...styles.packedInput,
+                                    ...styles.inputWithCheckPadding,
+                                    ...packedTone(packedDraftById[it.id], Number(it.qty ?? 0)),
+                                  }}
+                                />
+                                {savedPulseByKey[`packed:${it.id}`] ? <span style={styles.savedCheck}>✓</span> : null}
+                              </div>
+                            ) : (
+                              <div style={styles.packedReadOnly}>
+                                {packedDraftById[it.id] === "" ? "—" : packedDraftById[it.id]}
+                              </div>
+                            )}
+                          </div>
+                          <div style={styles.itemTotal}>₱ {fmtMoney(it.line_total)}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={styles.totalBlock}>
+                      <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
+                        <span>Subtotal</span>
+                        <strong style={styles.totalQtyCell}>{totalUnits}</strong>
+                        <strong style={styles.totalPickedCell}>{totalPickedUnits}</strong>
+                        <strong
+                          style={{
+                            ...styles.totalValueCell,
+                            gridColumn: 4,
+                          }}
+                        >
+                          ₱ {fmtMoney(detail.subtotal)}
+                        </strong>
+                      </div>
+                      <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
+                        <span>Delivery</span>
+                        <strong
+                          style={{
+                            ...styles.totalValueCell,
+                            gridColumn: 4,
+                          }}
+                        >
+                          {Number(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee) > 0
+                            ? `₱ ${fmtMoney(canEdit ? Number(adminDraft.delivery_fee) || 0 : detail.delivery_fee)}`
+                            : "FREE"}
+                        </strong>
+                      </div>
+                      <div style={{ ...styles.totalGridRow, gridTemplateColumns: itemGridTemplate }}>
+                        <span>{detail.thermal_bag_fee > 0 ? "Thermal bag" : "Standard bag"}</span>
+                        <strong
+                          style={{
+                            ...styles.totalValueCell,
+                            gridColumn: 4,
+                            ...(detail.thermal_bag_fee > 0 ? styles.adminHighlight : null),
+                          }}
+                        >
+                          {detail.thermal_bag_fee > 0 ? `₱ ${fmtMoney(detail.thermal_bag_fee)}` : "FREE"}
+                        </strong>
+                      </div>
+                      <div style={{ ...styles.totalGridRow, ...styles.totalStrong, gridTemplateColumns: itemGridTemplate }}>
+                        <span>Total</span>
+                        <strong
+                          style={{
+                            ...styles.totalValueCell,
+                            gridColumn: 4,
+                          }}
+                        >
+                          ₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}
+                        </strong>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {canEdit ? (
                   <div style={styles.addLineRow}>
@@ -674,7 +981,13 @@ export default function OrderDrawer({
                 ) : null}
               </section>
 
-              <section style={styles.rightCol}>
+                <section
+                  style={
+                    isMobileViewport
+                      ? { ...styles.rightCol, ...styles.rightColMobile }
+                      : styles.rightCol
+                  }
+                >
                 <div style={styles.sectionCard}>
                   <div style={styles.sectionTitle}>ORDER OVERVIEW</div>
                   <div style={styles.kvRow}>
@@ -684,27 +997,30 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Placed on</span>
                     {canEdit ? (
-                      <input
-                        type="date"
-                        value={adminDraft.created_at}
-                        onChange={(e) =>
-                          setAdminDraft((prev) => ({ ...prev, created_at: e.target.value }))
-                        }
-                        onBlur={() => {
-                          const nextDate = adminDraft.created_at;
-                          if (!nextDate) {
-                            void saveAdminFields({ created_at: null });
-                            return;
+                      <div style={styles.inputWithCheck}>
+                        <input
+                          type="date"
+                          value={adminDraft.created_at}
+                          onChange={(e) =>
+                            setAdminDraft((prev) => ({ ...prev, created_at: e.target.value }))
                           }
-                          const existing = detail.created_at ? new Date(detail.created_at) : null;
-                          const timePart =
-                            existing && !Number.isNaN(existing.getTime())
-                              ? existing.toISOString().slice(11, 24)
-                              : "00:00:00.000Z";
-                          void saveAdminFields({ created_at: `${nextDate}T${timePart}` });
-                        }}
-                        style={styles.kvInput}
-                      />
+                          onBlur={() => {
+                            const nextDate = adminDraft.created_at;
+                            if (!nextDate) {
+                              void saveAdminFields({ created_at: null }, "created_at");
+                              return;
+                            }
+                            const existing = detail.created_at ? new Date(detail.created_at) : null;
+                            const timePart =
+                              existing && !Number.isNaN(existing.getTime())
+                                ? existing.toISOString().slice(11, 24)
+                                : "00:00:00.000Z";
+                            void saveAdminFields({ created_at: `${nextDate}T${timePart}` }, "created_at");
+                          }}
+                          style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.created_at ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{fmtDate(detail.created_at)}</strong>
                     )}
@@ -724,12 +1040,15 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Name</span>
                     {canEdit ? (
-                      <input
-                        value={adminDraft.full_name}
-                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, full_name: e.target.value }))}
-                        onBlur={() => void saveAdminFields({ full_name: adminDraft.full_name.trim() || null })}
-                        style={styles.kvInput}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <input
+                          value={adminDraft.full_name}
+                          onChange={(e) => setAdminDraft((prev) => ({ ...prev, full_name: e.target.value }))}
+                          onBlur={() => void saveAdminFields({ full_name: adminDraft.full_name.trim() || null }, "full_name")}
+                          style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.full_name ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{detail.full_name || "—"}</strong>
                     )}
@@ -737,12 +1056,15 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Email</span>
                     {canEdit ? (
-                      <input
-                        value={adminDraft.email}
-                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, email: e.target.value }))}
-                        onBlur={() => void saveAdminFields({ email: adminDraft.email.trim() || null })}
-                        style={styles.kvInput}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <input
+                          value={adminDraft.email}
+                          onChange={(e) => setAdminDraft((prev) => ({ ...prev, email: e.target.value }))}
+                          onBlur={() => void saveAdminFields({ email: adminDraft.email.trim() || null }, "email")}
+                          style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.email ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{detail.email || "—"}</strong>
                     )}
@@ -750,12 +1072,15 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Mobile</span>
                     {canEdit ? (
-                      <input
-                        value={adminDraft.phone}
-                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, phone: e.target.value }))}
-                        onBlur={() => void saveAdminFields({ phone: adminDraft.phone.trim() || null })}
-                        style={styles.kvInput}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <input
+                          value={adminDraft.phone}
+                          onChange={(e) => setAdminDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                          onBlur={() => void saveAdminFields({ phone: adminDraft.phone.trim() || null }, "phone")}
+                          style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.phone ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{detail.phone || "—"}</strong>
                     )}
@@ -763,12 +1088,15 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Address</span>
                     {canEdit ? (
-                      <textarea
-                        value={adminDraft.address}
-                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, address: e.target.value }))}
-                        onBlur={() => void saveAdminFields({ address: adminDraft.address.trim() || null })}
-                        style={{ ...styles.kvInput, ...styles.kvTextarea }}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <textarea
+                          value={adminDraft.address}
+                          onChange={(e) => setAdminDraft((prev) => ({ ...prev, address: e.target.value }))}
+                          onBlur={() => void saveAdminFields({ address: adminDraft.address.trim() || null }, "address")}
+                          style={{ ...styles.kvInput, ...styles.kvTextarea, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.address ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{detail.address || "—"}</strong>
                     )}
@@ -776,12 +1104,15 @@ export default function OrderDrawer({
                   <div style={styles.kvRow}>
                     <span>Notes</span>
                     {canEdit ? (
-                      <textarea
-                        value={adminDraft.notes}
-                        onChange={(e) => setAdminDraft((prev) => ({ ...prev, notes: e.target.value }))}
-                        onBlur={() => void saveAdminFields({ notes: adminDraft.notes.trim() || null })}
-                        style={{ ...styles.kvInput, ...styles.kvTextarea }}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <textarea
+                          value={adminDraft.notes}
+                          onChange={(e) => setAdminDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                          onBlur={() => void saveAdminFields({ notes: adminDraft.notes.trim() || null }, "notes")}
+                          style={{ ...styles.kvInput, ...styles.kvTextarea, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.notes ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong style={detail.notes ? styles.adminHighlight : undefined}>
                         {detail.notes || "—"}
@@ -796,28 +1127,34 @@ export default function OrderDrawer({
                     <span>Schedule</span>
                     {canEdit ? (
                       <div style={styles.kvFieldStack}>
-                        <input
-                          type="date"
-                          value={adminDraft.delivery_date}
-                          onChange={(e) =>
-                            setAdminDraft((prev) => ({ ...prev, delivery_date: e.target.value }))
-                          }
-                          onBlur={() =>
-                            void saveAdminFields({ delivery_date: adminDraft.delivery_date || null })
-                          }
-                          style={styles.kvInput}
-                        />
-                        <input
-                          value={adminDraft.delivery_slot}
-                          onChange={(e) =>
-                            setAdminDraft((prev) => ({ ...prev, delivery_slot: e.target.value }))
-                          }
-                          onBlur={() =>
-                            void saveAdminFields({ delivery_slot: adminDraft.delivery_slot.trim() || null })
-                          }
-                          placeholder="HH:MM"
-                          style={styles.kvInput}
-                        />
+                        <div style={styles.inputWithCheck}>
+                          <input
+                            type="date"
+                            value={adminDraft.delivery_date}
+                            onChange={(e) =>
+                              setAdminDraft((prev) => ({ ...prev, delivery_date: e.target.value }))
+                            }
+                            onBlur={() =>
+                              void saveAdminFields({ delivery_date: adminDraft.delivery_date || null }, "delivery_date")
+                            }
+                            style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                          />
+                          {savedPulseByKey.delivery_date ? <span style={styles.savedCheck}>✓</span> : null}
+                        </div>
+                        <div style={styles.inputWithCheck}>
+                          <input
+                            value={adminDraft.delivery_slot}
+                            onChange={(e) =>
+                              setAdminDraft((prev) => ({ ...prev, delivery_slot: e.target.value }))
+                            }
+                            onBlur={() =>
+                              void saveAdminFields({ delivery_slot: adminDraft.delivery_slot.trim() || null }, "delivery_slot")
+                            }
+                            placeholder="HH:MM"
+                            style={{ ...styles.kvInput, ...styles.inputWithCheckPadding }}
+                          />
+                          {savedPulseByKey.delivery_slot ? <span style={styles.savedCheck}>✓</span> : null}
+                        </div>
                       </div>
                     ) : (
                       <strong>{fmtDateTime(detail.delivery_date, detail.delivery_slot)}</strong>
@@ -833,7 +1170,7 @@ export default function OrderDrawer({
                           onChange={(e) => {
                             const next = e.target.checked;
                             setAdminDraft((prev) => ({ ...prev, express_delivery: next }));
-                            void saveAdminFields({ express_delivery: next });
+                            void saveAdminFields({ express_delivery: next }, "express_delivery");
                           }}
                         />
                         <span>{adminDraft.express_delivery ? "YES" : "No"}</span>
@@ -852,7 +1189,7 @@ export default function OrderDrawer({
                         onChange={(e) => {
                           const next = e.target.value === "thermal";
                           setAdminDraft((prev) => ({ ...prev, add_thermal_bag: next }));
-                          void saveAdminFields({ add_thermal_bag: next });
+                          void saveAdminFields({ add_thermal_bag: next }, "add_thermal_bag");
                         }}
                         style={styles.kvInput}
                       >
@@ -908,12 +1245,11 @@ export default function OrderDrawer({
                       ) : null}
                     </div>
                   </div>
-                  {savingProof || savingAdminFields ? <div style={styles.savingTiny}>saving...</div> : null}
-                  <div style={styles.kvRow}>
-                    <span>Amount paid</span>
-                    <div style={styles.amountPaidInline}>
-                      {canEdit ? (
-                        <>
+                  {canEdit ? (
+                    <div style={styles.kvRow}>
+                      <span>Amount paid</span>
+                      <div style={styles.amountPaidInline}>
+                        <div style={styles.inputWithCheck}>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -922,43 +1258,42 @@ export default function OrderDrawer({
                             onBlur={() => {
                               void saveAmountPaid();
                             }}
-                            style={{ ...styles.amountPaidInput, ...paymentDeltaMessage.tone }}
+                            style={{ ...styles.amountPaidInput, ...styles.inputWithCheckPadding, ...paymentDeltaMessage.tone }}
                           />
-                          <div style={{ ...paymentDeltaMessage.tone, ...styles.paymentDeltaInline }}>
-                            {paymentDeltaMessage.label}
-                          </div>
-                        </>
-                      ) : (
-                        <strong style={styles.amountPaidValue}>
-                          ₱ {fmtMoney(amountPaid)}
-                        </strong>
-                      )}
+                          {savedPulseByKey.amount_paid ? <span style={styles.savedCheck}>✓</span> : null}
+                        </div>
+                        <div style={{ ...paymentDeltaMessage.tone, ...styles.paymentDeltaInline }}>
+                          {paymentDeltaMessage.label}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  {savingAmountPaid ? <div style={styles.savingTiny}>saving...</div> : null}
+                  ) : null}
                   <div style={styles.kvRow}>
                     <span>Delivery fee</span>
                     {canEdit ? (
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={adminDraft.delivery_fee}
-                        onChange={(e) =>
-                          setAdminDraft((prev) => ({ ...prev, delivery_fee: e.target.value }))
-                        }
-                        onBlur={() => {
-                          const raw = Number(adminDraft.delivery_fee);
-                          const nextFee = Number.isNaN(raw) ? 0 : Math.max(0, raw);
-                          void saveAdminFields({
-                            delivery_fee: nextFee,
-                            total_selling_price:
-                              Number(detail.subtotal ?? 0) +
-                              nextFee +
-                              Number(detail.thermal_bag_fee ?? 0),
-                          });
-                        }}
-                        style={styles.amountPaidInput}
-                      />
+                      <div style={styles.inputWithCheck}>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={adminDraft.delivery_fee}
+                          onChange={(e) =>
+                            setAdminDraft((prev) => ({ ...prev, delivery_fee: e.target.value }))
+                          }
+                          onBlur={() => {
+                            const raw = Number(adminDraft.delivery_fee);
+                            const nextFee = Number.isNaN(raw) ? 0 : Math.max(0, raw);
+                            void saveAdminFields({
+                              delivery_fee: nextFee,
+                              total_selling_price:
+                                Number(detail.subtotal ?? 0) +
+                                nextFee +
+                                Number(detail.thermal_bag_fee ?? 0),
+                            }, "delivery_fee");
+                          }}
+                          style={{ ...styles.amountPaidInput, ...styles.inputWithCheckPadding }}
+                        />
+                        {savedPulseByKey.delivery_fee ? <span style={styles.savedCheck}>✓</span> : null}
+                      </div>
                     ) : (
                       <strong>{detail.delivery_fee > 0 ? `₱ ${fmtMoney(detail.delivery_fee)}` : "FREE"}</strong>
                     )}
@@ -968,8 +1303,9 @@ export default function OrderDrawer({
                     <strong>₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}</strong>
                   </div>
                 </div>
-              </section>
-            </div>
+                </section>
+              </div>
+            </>
           ) : null}
         </div>
       </aside>
@@ -1142,6 +1478,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: TITLE_GAP,
     padding: "18px 0 15px",
   },
+  topRowMobile: {
+    minHeight: 0,
+    display: "block",
+    padding: "10px 10px 8px",
+  },
+  mobileHeaderStack: {
+    display: "grid",
+    gap: 8,
+  },
+  mobileHeaderMainRow: {
+    display: "grid",
+    gridTemplateColumns: `${BACK_BTN_W}px minmax(0,1fr)`,
+    alignItems: "center",
+    columnGap: 8,
+  },
   backBtn: {
     width: BACK_BTN_W,
     minWidth: BACK_BTN_W,
@@ -1172,6 +1523,27 @@ const styles: Record<string, React.CSSProperties> = {
   },
   hint: { marginTop: 12, fontSize: 15, opacity: 0.75 },
   statusGroup: { marginLeft: "auto", display: "flex", alignItems: "center", gap: 24 },
+  mobileStatusCard: {
+    border: "1px solid var(--tp-border-color-soft)",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    background: "var(--tp-control-bg-soft)",
+    display: "grid",
+    gap: 8,
+  },
+  statusFieldMobile: {
+    display: "grid",
+    gridTemplateColumns: "96px minmax(0,1fr)",
+    gap: 10,
+    alignItems: "center",
+  },
+  statusSelectMobile: {
+    width: "100%",
+  },
+  statusChipMobile: {
+    width: "100%",
+  },
   statusField: { display: "flex", flexDirection: "row", gap: 10, alignItems: "center" },
   statusLabel: {
     fontSize: 10,
@@ -1192,6 +1564,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 10px",
     fontSize: 15,
     textTransform: "uppercase",
+    textAlign: "center",
+    textAlignLast: "center",
   },
   statusChip: {
     width: STATUS_CONTROL_W,
@@ -1214,6 +1588,11 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 20,
     paddingRight: 0,
   },
+  sectionGridMobile: {
+    height: "auto",
+    gridTemplateColumns: "1fr",
+    gap: 12,
+  },
   publicNotice: {
     gridColumn: "1 / -1",
     border: "1px solid rgba(102,199,255,0.42)",
@@ -1234,11 +1613,47 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     background: "var(--tp-control-bg-soft)",
   },
+  leftColMobile: {
+    order: 2,
+    minHeight: "auto",
+    overflow: "visible",
+    display: "block",
+  },
   itemListScroll: {
     flex: 1,
     minHeight: 0,
     overflowY: "auto",
     paddingRight: 4,
+  },
+  itemListMobile: {
+    display: "grid",
+    gap: 10,
+  },
+  itemCardMobile: {
+    borderBottom: "1px solid var(--tp-border-color-soft)",
+    paddingBottom: 10,
+  },
+  itemStatsMobile: {
+    marginTop: 8,
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+    gap: 8,
+  },
+  itemStatCellMobile: {
+    display: "grid",
+    gap: 3,
+    alignContent: "start",
+  },
+  itemStatLabelMobile: {
+    fontSize: 11,
+    opacity: 0.65,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  itemStatValueMobile: {
+    fontSize: 15,
+    fontWeight: 700,
+    minHeight: 24,
   },
   rightCol: {
     order: 1,
@@ -1247,6 +1662,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 12,
     alignContent: "start",
+  },
+  rightColMobile: {
+    order: 1,
+    overflowY: "visible",
   },
   sectionCard: {
     border: "1px solid var(--tp-border-color-soft)",
@@ -1281,7 +1700,25 @@ const styles: Record<string, React.CSSProperties> = {
   },
   itemName: { fontSize: 15, fontWeight: 700, marginBottom: 4 },
   itemMeta: { marginTop: 0, fontSize: 15, opacity: 0.78 },
-  adminAddedText: { marginTop: 2, fontSize: 15, color: "#66c7ff", fontWeight: 700 },
+  metaInputRow: {
+    marginTop: 2,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  metaInputPrefix: { fontSize: 14, opacity: 0.82, fontWeight: 700 },
+  metaInputSuffix: { fontSize: 14, opacity: 0.82 },
+  inlinePriceInput: {
+    width: 92,
+    height: 30,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    textAlign: "center",
+    fontSize: 14,
+  },
+  adminAddedText: { marginTop: 2, fontSize: 15, color: "#c38a28", fontWeight: 700 },
   itemQty: { fontSize: 15, fontWeight: 800, minWidth: 32, textAlign: "center" },
   itemTotal: { fontSize: 15, fontWeight: 700, minWidth: 108, textAlign: "right" },
   itemPackedCell: { minWidth: 90, textAlign: "center" },
@@ -1303,8 +1740,35 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   packedReadOnly: { fontSize: 15, fontWeight: 700, minHeight: 24, textAlign: "center" },
-  savingTiny: { fontSize: 11, opacity: 0.65, marginTop: 2 },
+  inputWithCheck: { position: "relative", width: "100%" },
+  inputWithCheckPadding: { paddingRight: 28 },
+  savedCheck: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: "translateY(-50%)",
+    fontSize: 13,
+    color: "#67bf8a",
+    fontWeight: 900,
+    pointerEvents: "none",
+  },
   totalBlock: { marginTop: 12, borderTop: "1px solid var(--tp-border-color-soft)", paddingTop: 12 },
+  totalBlockMobile: { marginTop: 8, borderTop: "1px solid var(--tp-border-color-soft)", paddingTop: 10 },
+  totalRowMobile: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto auto",
+    gap: 10,
+    alignItems: "center",
+    fontSize: 15,
+    marginBottom: 8,
+  },
+  totalStrongMobile: {
+    fontSize: 20,
+    marginTop: 6,
+    paddingTop: 8,
+    borderTop: "1px solid var(--tp-border-color-soft)",
+    marginBottom: 0,
+  },
   totalGridRow: {
     display: "grid",
     gridTemplateColumns: "1fr 84px 108px 90px",
@@ -1432,10 +1896,10 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
     whiteSpace: "nowrap",
   },
-  paymentDeltaRow: { marginTop: 4, fontSize: 15, color: "#66c7ff" },
+  paymentDeltaRow: { marginTop: 4, fontSize: 15, color: "#c38a28" },
   paymentDeltaRowWarn: { marginTop: 4, fontSize: 15, color: "#de6464" },
   paymentDeltaRowOk: { marginTop: 4, fontSize: 15, color: "#67bf8a" },
-  adminHighlight: { color: "#66c7ff", fontWeight: 900 },
+  adminHighlight: { color: "#c38a28", fontWeight: 900 },
   addLineRow: { marginTop: 14, display: "flex", justifyContent: "space-between", gap: 12 },
   addLineBtn: {
     height: 34,
@@ -1544,7 +2008,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: "calc(100vh - 40px)",
     border: "1px solid var(--tp-border-color)",
     borderRadius: 12,
-    background: "var(--tp-control-bg-soft)",
+    background: "var(--tp-page-bg)",
     padding: 14,
     display: "flex",
     flexDirection: "column",
@@ -1554,7 +2018,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 40,
     borderRadius: 10,
     border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg-soft)",
+    background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
     padding: "0 15px",
     fontSize: 15,
@@ -1566,6 +2030,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color-soft)",
     borderRadius: 10,
     padding: "4px 10px",
+    background: "var(--tp-page-bg)",
   },
   addLineItem: {
     display: "grid",
@@ -1591,7 +2056,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 30,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg-soft)",
+    background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
     fontSize: 18,
     fontWeight: 800,
@@ -1602,7 +2067,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: 30,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg-soft)",
+    background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
     textAlign: "center",
     fontSize: 15,

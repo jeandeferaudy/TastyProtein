@@ -17,6 +17,8 @@ export type ThemeColorsDraft = {
   button_bg_color: string;
   checkbox_color: string;
   background_color?: string;
+  font_family?: string;
+  font_scale?: number;
 };
 
 export type BannerDraft = {
@@ -29,6 +31,12 @@ export type BannerDraft = {
 export type CheckoutPaymentDraft = {
   gcash_qr_url: string;
   gcash_phone: string;
+};
+
+export type FontOption = {
+  id: string;
+  name: string;
+  style: string;
 };
 
 type Props = {
@@ -50,6 +58,7 @@ type Props = {
   paymentDraft?: CheckoutPaymentDraft;
   onSavePaymentDraft?: (next: CheckoutPaymentDraft) => Promise<boolean> | boolean;
   onUploadPaymentQr?: (file: File) => Promise<string>;
+  fontOptions?: FontOption[];
 };
 
 export default function ZoneStyleModal({
@@ -71,6 +80,7 @@ export default function ZoneStyleModal({
   paymentDraft,
   onSavePaymentDraft,
   onUploadPaymentQr,
+  fontOptions = [],
 }: Props) {
   const [draft, setDraft] = React.useState<ZoneStyleDraft>(initial);
   const [colorsDraft, setColorsDraft] = React.useState<ThemeColorsDraft | null>(
@@ -101,7 +111,9 @@ export default function ZoneStyleModal({
         a.button_border_color === b.button_border_color &&
         a.button_bg_color === b.button_bg_color &&
         a.checkbox_color === b.checkbox_color &&
-        String(a.background_color ?? "") === String(b.background_color ?? "")
+        String(a.background_color ?? "") === String(b.background_color ?? "") &&
+        String(a.font_family ?? "") === String(b.font_family ?? "") &&
+        Number(a.font_scale ?? 1) === Number(b.font_scale ?? 1)
       );
     },
     []
@@ -267,6 +279,46 @@ export default function ZoneStyleModal({
             <>
               <div style={styles.sectionDivider} />
               <div style={styles.sectionTitle}>Theme colors</div>
+              {fontOptions.length > 0 ? (
+                <label style={styles.colorField}>
+                  <span style={styles.colorLabel}>Font family</span>
+                  <select
+                    value={String(colorsDraft.font_family || fontOptions[0]?.id || "")}
+                    onChange={(e) =>
+                      setColorsDraft((prev) =>
+                        prev ? { ...prev, font_family: e.target.value } : prev
+                      )
+                    }
+                    style={styles.selectInput}
+                  >
+                    {fontOptions.map((font) => (
+                      <option key={font.id} value={font.id}>
+                        {font.name} ({font.style})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label style={styles.colorField}>
+                <span style={styles.colorLabel}>Font size boost</span>
+                <select
+                  value={String(colorsDraft.font_scale ?? 1)}
+                  onChange={(e) =>
+                    setColorsDraft((prev) =>
+                      prev ? { ...prev, font_scale: Number(e.target.value) } : prev
+                    )
+                  }
+                  style={styles.selectInput}
+                >
+                  <option value="1">100% (Default)</option>
+                  <option value="1.05">105%</option>
+                  <option value="1.1">110%</option>
+                  <option value="1.15">115%</option>
+                  <option value="1.2">120%</option>
+                  <option value="1.25">125%</option>
+                  <option value="1.3">130%</option>
+                </select>
+              </label>
               <div style={styles.colorGrid}>
                 <label style={styles.colorField}>
                   <span style={styles.colorLabel}>Accent</span>
@@ -811,6 +863,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
     padding: "0 15px",
+  },
+  selectInput: {
+    width: "100%",
+    height: 40,
+    borderRadius: 10,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    padding: "0 12px",
+    fontSize: 14,
   },
   preview: {
     height: 90,

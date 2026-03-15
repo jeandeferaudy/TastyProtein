@@ -20,6 +20,8 @@ export type InventoryLine = {
   qty_on_hand: number;
   qty_allocated: number;
   qty_available: number;
+  reorder_point: number;
+  target_stock: number;
 };
 
 type Props = {
@@ -31,6 +33,8 @@ type Props = {
   backgroundStyle?: React.CSSProperties;
   onChangeUnlimited?: (productId: string, next: boolean) => Promise<void> | void;
   onChangeQtyOnHand?: (productId: string, next: number) => Promise<void> | void;
+  onChangeReorderPoint?: (productId: string, next: number) => Promise<void> | void;
+  onChangeTargetStock?: (productId: string, next: number) => Promise<void> | void;
   onBulkChangeUnlimited?: (productIds: string[], next: boolean) => Promise<void> | void;
   onBulkChangeQtyOnHand?: (productIds: string[], next: number) => Promise<void> | void;
 };
@@ -43,12 +47,22 @@ type InventoryTableRowProps = {
   isSelected: boolean;
   isUnlimitedSaving: boolean;
   qtyDraft: string;
+  reorderPointDraft: string;
+  targetStockDraft: string;
   onToggleRow: (productId: string, checked: boolean) => void;
   onChangeUnlimited: (productId: string, next: boolean) => void;
   onQtyDraftChange: (productId: string, value: string) => void;
   onQtyFocus: (productId: string) => void;
   onQtyBlur: (productId: string) => void;
   onQtyEnter: (productId: string, inputEl: HTMLInputElement) => void;
+  onReorderPointDraftChange: (productId: string, value: string) => void;
+  onReorderPointFocus: (productId: string) => void;
+  onReorderPointBlur: (productId: string) => void;
+  onReorderPointEnter: (productId: string, inputEl: HTMLInputElement) => void;
+  onTargetStockDraftChange: (productId: string, value: string) => void;
+  onTargetStockFocus: (productId: string) => void;
+  onTargetStockBlur: (productId: string) => void;
+  onTargetStockEnter: (productId: string, inputEl: HTMLInputElement) => void;
 };
 
 const InventoryTableRow = React.memo(function InventoryTableRow({
@@ -56,19 +70,31 @@ const InventoryTableRow = React.memo(function InventoryTableRow({
   isSelected,
   isUnlimitedSaving,
   qtyDraft,
+  reorderPointDraft,
+  targetStockDraft,
   onToggleRow,
   onChangeUnlimited,
   onQtyDraftChange,
   onQtyFocus,
   onQtyBlur,
   onQtyEnter,
+  onReorderPointDraftChange,
+  onReorderPointFocus,
+  onReorderPointBlur,
+  onReorderPointEnter,
+  onTargetStockDraftChange,
+  onTargetStockFocus,
+  onTargetStockBlur,
+  onTargetStockEnter,
 }: InventoryTableRowProps) {
   const isZeroOnHand = Number(row.qty_on_hand) <= 0;
   const safeAllocated = Math.max(0, Number(row.qty_allocated) || 0);
   const safeAvailable = Math.max(0, (Number(row.qty_on_hand) || 0) - safeAllocated);
+  const isBelowReorder = !row.unlimited_stock && safeAvailable < Math.max(0, Number(row.reorder_point) || 0);
+  const suggestedBuy = Math.max(0, Math.max(Number(row.target_stock) || 0, Number(row.reorder_point) || 0) - safeAvailable);
 
   return (
-    <div style={styles.lineRow}>
+    <div style={{ ...styles.lineRow, ...(isBelowReorder ? styles.lineRowAlert : null) }}>
       <div style={styles.centerCell}>
         <input
           type="checkbox"
@@ -133,10 +159,47 @@ const InventoryTableRow = React.memo(function InventoryTableRow({
       <div
         style={{
           ...styles.numberCellStrong,
-          ...(isZeroOnHand ? styles.zeroStockNumberStrong : null),
+          ...(isBelowReorder ? styles.alertNumberStrong : isZeroOnHand ? styles.zeroStockNumberStrong : null),
         }}
       >
         {safeAvailable}
+      </div>
+      <div style={styles.centerCell}>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={reorderPointDraft}
+          onChange={(e) => onReorderPointDraftChange(row.product_id, e.target.value)}
+          onFocus={() => onReorderPointFocus(row.product_id)}
+          onBlur={() => onReorderPointBlur(row.product_id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onReorderPointEnter(row.product_id, e.currentTarget);
+            }
+          }}
+          style={{ ...styles.input, ...(isBelowReorder ? styles.alertInput : null) }}
+        />
+      </div>
+      <div style={styles.centerCell}>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={targetStockDraft}
+          onChange={(e) => onTargetStockDraftChange(row.product_id, e.target.value)}
+          onFocus={() => onTargetStockFocus(row.product_id)}
+          onBlur={() => onTargetStockBlur(row.product_id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onTargetStockEnter(row.product_id, e.currentTarget);
+            }
+          }}
+          style={styles.input}
+        />
+      </div>
+      <div style={{ ...styles.numberCellStrong, ...(isBelowReorder ? styles.alertNumberStrong : null) }}>
+        {suggestedBuy}
       </div>
     </div>
   );
@@ -149,20 +212,32 @@ const InventoryMobileCard = React.memo(function InventoryMobileCard({
   isSelected,
   isUnlimitedSaving,
   qtyDraft,
+  reorderPointDraft,
+  targetStockDraft,
   onToggleRow,
   onChangeUnlimited,
   onQtyDraftChange,
   onQtyFocus,
   onQtyBlur,
   onQtyEnter,
+  onReorderPointDraftChange,
+  onReorderPointFocus,
+  onReorderPointBlur,
+  onReorderPointEnter,
+  onTargetStockDraftChange,
+  onTargetStockFocus,
+  onTargetStockBlur,
+  onTargetStockEnter,
 }: InventoryMobileCardProps) {
   const isZeroOnHand = Number(row.qty_on_hand) <= 0;
   const safeAllocated = Math.max(0, Number(row.qty_allocated) || 0);
   const safeAvailable = Math.max(0, (Number(row.qty_on_hand) || 0) - safeAllocated);
   const meta = [row.format || "—", row.preparation || "—", row.temperature || "—"].join(" • ");
+  const isBelowReorder = !row.unlimited_stock && safeAvailable < Math.max(0, Number(row.reorder_point) || 0);
+  const suggestedBuy = Math.max(0, Math.max(Number(row.target_stock) || 0, Number(row.reorder_point) || 0) - safeAvailable);
 
   return (
-    <div style={styles.mobileCard}>
+    <div style={{ ...styles.mobileCard, ...(isBelowReorder ? styles.mobileCardAlert : null) }}>
       <div style={styles.mobileCardTop}>
         <input
           type="checkbox"
@@ -239,10 +314,56 @@ const InventoryMobileCard = React.memo(function InventoryMobileCard({
           <div
             style={{
               ...styles.numberCellStrong,
-              ...(isZeroOnHand ? styles.zeroStockNumberStrong : null),
+              ...(isBelowReorder ? styles.alertNumberStrong : isZeroOnHand ? styles.zeroStockNumberStrong : null),
             }}
           >
             {safeAvailable}
+          </div>
+        </div>
+      </div>
+      <div style={styles.mobileControlsRow}>
+        <div style={styles.mobileField}>
+          <div style={styles.mobileLabel}>Reorder point</div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={reorderPointDraft}
+            onChange={(e) => onReorderPointDraftChange(row.product_id, e.target.value)}
+            onFocus={() => onReorderPointFocus(row.product_id)}
+            onBlur={() => onReorderPointBlur(row.product_id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onReorderPointEnter(row.product_id, e.currentTarget);
+              }
+            }}
+            style={{ ...styles.input, ...(isBelowReorder ? styles.alertInput : null) }}
+          />
+        </div>
+        <div style={styles.mobileField}>
+          <div style={styles.mobileLabel}>Target stock</div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={targetStockDraft}
+            onChange={(e) => onTargetStockDraftChange(row.product_id, e.target.value)}
+            onFocus={() => onTargetStockFocus(row.product_id)}
+            onBlur={() => onTargetStockBlur(row.product_id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onTargetStockEnter(row.product_id, e.currentTarget);
+              }
+            }}
+            style={styles.input}
+          />
+        </div>
+      </div>
+      <div style={styles.mobileNumbersRow}>
+        <div style={styles.mobileNumItem}>
+          <div style={styles.mobileLabel}>Stock up</div>
+          <div style={{ ...styles.numberCellStrong, ...(isBelowReorder ? styles.alertNumberStrong : null) }}>
+            {suggestedBuy}
           </div>
         </div>
       </div>
@@ -259,6 +380,8 @@ export default function InventoryDrawer({
   backgroundStyle,
   onChangeUnlimited,
   onChangeQtyOnHand,
+  onChangeReorderPoint,
+  onChangeTargetStock,
   onBulkChangeUnlimited,
   onBulkChangeQtyOnHand,
 }: Props) {
@@ -269,13 +392,24 @@ export default function InventoryDrawer({
   const [bulkOnHandOpen, setBulkOnHandOpen] = React.useState(false);
   const [bulkOnHandDraft, setBulkOnHandDraft] = React.useState("");
   const [qtyDraftByProduct, setQtyDraftByProduct] = React.useState<Record<string, string>>({});
+  const [reorderPointDraftByProduct, setReorderPointDraftByProduct] = React.useState<Record<string, string>>({});
+  const [targetStockDraftByProduct, setTargetStockDraftByProduct] = React.useState<Record<string, string>>({});
+  const [stockUpOpen, setStockUpOpen] = React.useState(false);
   const [savingUnlimitedByProduct, setSavingUnlimitedByProduct] = React.useState<Record<string, boolean>>({});
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const skipNextBlurSaveRef = React.useRef<Record<string, boolean>>({});
+  const skipNextReorderBlurSaveRef = React.useRef<Record<string, boolean>>({});
+  const skipNextTargetBlurSaveRef = React.useRef<Record<string, boolean>>({});
   const savingByProductRef = React.useRef<Record<string, boolean>>({});
+  const savingReorderByProductRef = React.useRef<Record<string, boolean>>({});
+  const savingTargetByProductRef = React.useRef<Record<string, boolean>>({});
   const activeEditByProductRef = React.useRef<Record<string, boolean>>({});
+  const activeReorderEditByProductRef = React.useRef<Record<string, boolean>>({});
+  const activeTargetEditByProductRef = React.useRef<Record<string, boolean>>({});
   const queuedSaveByProductRef = React.useRef<Record<string, boolean>>({});
+  const queuedReorderSaveByProductRef = React.useRef<Record<string, boolean>>({});
+  const queuedTargetSaveByProductRef = React.useRef<Record<string, boolean>>({});
   const pendingScrollTopRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
@@ -309,6 +443,62 @@ export default function InventoryDrawer({
         }
       }
 
+      return changed ? next : prev;
+    });
+  }, [rows]);
+
+  React.useEffect(() => {
+    setReorderPointDraftByProduct((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const liveIds = new Set(rows.map((r) => r.product_id));
+      for (const row of rows) {
+        const id = row.product_id;
+        const normalized = String(Math.max(0, Math.floor(Number(row.reorder_point) || 0)));
+        if (next[id] === undefined) {
+          next[id] = normalized;
+          changed = true;
+          continue;
+        }
+        if (!savingReorderByProductRef.current[id] && !activeReorderEditByProductRef.current[id] && next[id] !== normalized) {
+          next[id] = normalized;
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!liveIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [rows]);
+
+  React.useEffect(() => {
+    setTargetStockDraftByProduct((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const liveIds = new Set(rows.map((r) => r.product_id));
+      for (const row of rows) {
+        const id = row.product_id;
+        const normalized = String(Math.max(0, Math.floor(Number(row.target_stock) || 0)));
+        if (next[id] === undefined) {
+          next[id] = normalized;
+          changed = true;
+          continue;
+        }
+        if (!savingTargetByProductRef.current[id] && !activeTargetEditByProductRef.current[id] && next[id] !== normalized) {
+          next[id] = normalized;
+          changed = true;
+        }
+      }
+      for (const id of Object.keys(next)) {
+        if (!liveIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
       return changed ? next : prev;
     });
   }, [rows]);
@@ -364,6 +554,58 @@ export default function InventoryDrawer({
     [onChangeQtyOnHand, qtyDraftByProduct]
   );
 
+  const saveReorderPoint = React.useCallback(
+    async (productId: string) => {
+      if (!onChangeReorderPoint) return;
+      if (savingReorderByProductRef.current[productId]) {
+        queuedReorderSaveByProductRef.current[productId] = true;
+        return;
+      }
+      const parsed = Math.max(0, Math.floor(Number(reorderPointDraftByProduct[productId] || 0)));
+      if (Number.isNaN(parsed)) return;
+      pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
+      savingReorderByProductRef.current = { ...savingReorderByProductRef.current, [productId]: true };
+      try {
+        await onChangeReorderPoint(productId, parsed);
+      } finally {
+        savingReorderByProductRef.current = { ...savingReorderByProductRef.current, [productId]: false };
+        if (queuedReorderSaveByProductRef.current[productId]) {
+          delete queuedReorderSaveByProductRef.current[productId];
+          window.setTimeout(() => {
+            void saveReorderPoint(productId);
+          }, 0);
+        }
+      }
+    },
+    [onChangeReorderPoint, reorderPointDraftByProduct]
+  );
+
+  const saveTargetStock = React.useCallback(
+    async (productId: string) => {
+      if (!onChangeTargetStock) return;
+      if (savingTargetByProductRef.current[productId]) {
+        queuedTargetSaveByProductRef.current[productId] = true;
+        return;
+      }
+      const parsed = Math.max(0, Math.floor(Number(targetStockDraftByProduct[productId] || 0)));
+      if (Number.isNaN(parsed)) return;
+      pendingScrollTopRef.current = listRef.current?.scrollTop ?? null;
+      savingTargetByProductRef.current = { ...savingTargetByProductRef.current, [productId]: true };
+      try {
+        await onChangeTargetStock(productId, parsed);
+      } finally {
+        savingTargetByProductRef.current = { ...savingTargetByProductRef.current, [productId]: false };
+        if (queuedTargetSaveByProductRef.current[productId]) {
+          delete queuedTargetSaveByProductRef.current[productId];
+          window.setTimeout(() => {
+            void saveTargetStock(productId);
+          }, 0);
+        }
+      }
+    },
+    [onChangeTargetStock, targetStockDraftByProduct]
+  );
+
   const saveUnlimited = React.useCallback(
     async (productId: string, next: boolean) => {
       if (!onChangeUnlimited) return;
@@ -409,6 +651,65 @@ export default function InventoryDrawer({
     },
     [saveQty]
   );
+  const handleReorderPointDraftChange = React.useCallback((productId: string, value: string) => {
+    activeReorderEditByProductRef.current[productId] = true;
+    setReorderPointDraftByProduct((prev) => ({ ...prev, [productId]: value }));
+  }, []);
+
+  const handleReorderPointFocus = React.useCallback((productId: string) => {
+    activeReorderEditByProductRef.current[productId] = true;
+  }, []);
+
+  const handleReorderPointBlur = React.useCallback(
+    (productId: string) => {
+      delete activeReorderEditByProductRef.current[productId];
+      if (skipNextReorderBlurSaveRef.current[productId]) {
+        delete skipNextReorderBlurSaveRef.current[productId];
+        return;
+      }
+      void saveReorderPoint(productId);
+    },
+    [saveReorderPoint]
+  );
+
+  const handleReorderPointEnter = React.useCallback(
+    (productId: string, inputEl: HTMLInputElement) => {
+      skipNextReorderBlurSaveRef.current[productId] = true;
+      void saveReorderPoint(productId);
+      inputEl.blur();
+    },
+    [saveReorderPoint]
+  );
+
+  const handleTargetStockDraftChange = React.useCallback((productId: string, value: string) => {
+    activeTargetEditByProductRef.current[productId] = true;
+    setTargetStockDraftByProduct((prev) => ({ ...prev, [productId]: value }));
+  }, []);
+
+  const handleTargetStockFocus = React.useCallback((productId: string) => {
+    activeTargetEditByProductRef.current[productId] = true;
+  }, []);
+
+  const handleTargetStockBlur = React.useCallback(
+    (productId: string) => {
+      delete activeTargetEditByProductRef.current[productId];
+      if (skipNextTargetBlurSaveRef.current[productId]) {
+        delete skipNextTargetBlurSaveRef.current[productId];
+        return;
+      }
+      void saveTargetStock(productId);
+    },
+    [saveTargetStock]
+  );
+
+  const handleTargetStockEnter = React.useCallback(
+    (productId: string, inputEl: HTMLInputElement) => {
+      skipNextTargetBlurSaveRef.current[productId] = true;
+      void saveTargetStock(productId);
+      inputEl.blur();
+    },
+    [saveTargetStock]
+  );
   const filteredRows = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -427,6 +728,30 @@ export default function InventoryDrawer({
         .includes(q);
     });
   }, [rows, search, statusFilter]);
+  const stockUpRows = React.useMemo(
+    () =>
+      filteredRows
+        .filter((row) => {
+          if (row.unlimited_stock) return false;
+          const available = Math.max(0, Number(row.qty_available) || 0);
+          const reorderPoint = Math.max(0, Number(row.reorder_point) || 0);
+          const targetStock = Math.max(reorderPoint, Number(row.target_stock) || 0);
+          return available < reorderPoint && targetStock > available;
+        })
+        .map((row) => {
+          const available = Math.max(0, Number(row.qty_available) || 0);
+          const reorderPoint = Math.max(0, Number(row.reorder_point) || 0);
+          const targetStock = Math.max(reorderPoint, Number(row.target_stock) || 0);
+          return {
+            ...row,
+            suggested_buy: Math.max(0, targetStock - available),
+            reorder_point_safe: reorderPoint,
+            target_stock_safe: targetStock,
+          };
+        })
+        .sort((a, b) => b.suggested_buy - a.suggested_buy || a.name.localeCompare(b.name)),
+    [filteredRows]
+  );
   const filteredIds = React.useMemo(
     () => filteredRows.map((row) => row.product_id),
     [filteredRows]
@@ -632,6 +957,9 @@ export default function InventoryDrawer({
                     <option value="active">Active</option>
                     <option value="all">All</option>
                   </select>
+                  <button type="button" style={styles.stockUpBtn} onClick={() => setStockUpOpen(true)}>
+                    STOCK UP
+                  </button>
                 </div>
               )}
               <div style={{ ...styles.tableWrap, ...(isMobileViewport ? styles.tableWrapMobile : null) }}>
@@ -666,6 +994,9 @@ export default function InventoryDrawer({
                     <div style={styles.centerHead}>ON HAND</div>
                     <div style={styles.centerHead}>ALLOCATED</div>
                     <div style={styles.centerHead}>AVAILABLE</div>
+                    <div style={styles.centerHead}>REORDER POINT</div>
+                    <div style={styles.centerHead}>TARGET STOCK</div>
+                    <div style={styles.centerHead}>STOCK UP</div>
                   </div>
                 )}
                 <div
@@ -683,12 +1014,22 @@ export default function InventoryDrawer({
                         isSelected={selectedSet.has(row.product_id)}
                         isUnlimitedSaving={Boolean(savingUnlimitedByProduct[row.product_id])}
                         qtyDraft={qtyDraftByProduct[row.product_id] ?? ""}
+                        reorderPointDraft={reorderPointDraftByProduct[row.product_id] ?? ""}
+                        targetStockDraft={targetStockDraftByProduct[row.product_id] ?? ""}
                         onToggleRow={toggleRowSelection}
                         onChangeUnlimited={saveUnlimited}
                         onQtyDraftChange={handleQtyDraftChange}
                         onQtyFocus={handleQtyFocus}
                         onQtyBlur={handleQtyBlur}
                         onQtyEnter={handleQtyEnter}
+                        onReorderPointDraftChange={handleReorderPointDraftChange}
+                        onReorderPointFocus={handleReorderPointFocus}
+                        onReorderPointBlur={handleReorderPointBlur}
+                        onReorderPointEnter={handleReorderPointEnter}
+                        onTargetStockDraftChange={handleTargetStockDraftChange}
+                        onTargetStockFocus={handleTargetStockFocus}
+                        onTargetStockBlur={handleTargetStockBlur}
+                        onTargetStockEnter={handleTargetStockEnter}
                       />
                     ) : (
                       <InventoryTableRow
@@ -697,12 +1038,22 @@ export default function InventoryDrawer({
                         isSelected={selectedSet.has(row.product_id)}
                         isUnlimitedSaving={Boolean(savingUnlimitedByProduct[row.product_id])}
                         qtyDraft={qtyDraftByProduct[row.product_id] ?? ""}
+                        reorderPointDraft={reorderPointDraftByProduct[row.product_id] ?? ""}
+                        targetStockDraft={targetStockDraftByProduct[row.product_id] ?? ""}
                         onToggleRow={toggleRowSelection}
                         onChangeUnlimited={saveUnlimited}
                         onQtyDraftChange={handleQtyDraftChange}
                         onQtyFocus={handleQtyFocus}
                         onQtyBlur={handleQtyBlur}
                         onQtyEnter={handleQtyEnter}
+                        onReorderPointDraftChange={handleReorderPointDraftChange}
+                        onReorderPointFocus={handleReorderPointFocus}
+                        onReorderPointBlur={handleReorderPointBlur}
+                        onReorderPointEnter={handleReorderPointEnter}
+                        onTargetStockDraftChange={handleTargetStockDraftChange}
+                        onTargetStockFocus={handleTargetStockFocus}
+                        onTargetStockBlur={handleTargetStockBlur}
+                        onTargetStockEnter={handleTargetStockEnter}
                       />
                     )
                   )}
@@ -741,6 +1092,36 @@ export default function InventoryDrawer({
                         }}
                       >
                         Confirm
+                      </AppButton>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {stockUpOpen ? (
+                <div style={styles.bulkModalBackdrop} onClick={() => setStockUpOpen(false)}>
+                  <div style={{ ...styles.bulkModal, ...styles.stockUpModal }} onClick={(e) => e.stopPropagation()}>
+                    <div style={styles.bulkModalTitle}>Stock Up List</div>
+                    <div style={styles.stockUpHint}>
+                      Items shown here are below their reorder point. Suggested buy is based on target stock.
+                    </div>
+                    {stockUpRows.length === 0 ? (
+                      <div style={styles.hint}>No products currently need restocking.</div>
+                    ) : (
+                      <div style={styles.stockUpList}>
+                        {stockUpRows.map((row) => (
+                          <div key={row.product_id} style={styles.stockUpRow}>
+                            <div style={styles.stockUpName}>{row.name}</div>
+                            <div style={styles.stockUpMeta}>
+                              Available {row.qty_available} • Reorder point {row.reorder_point_safe} • Target {row.target_stock_safe}
+                            </div>
+                            <div style={styles.stockUpQty}>Buy {row.suggested_buy}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={styles.bulkModalActions}>
+                      <AppButton variant="ghost" style={styles.bulkModalBtn} onClick={() => setStockUpOpen(false)}>
+                        CLOSE
                       </AppButton>
                     </div>
                   </div>
@@ -830,6 +1211,20 @@ const styles: Record<string, React.CSSProperties> = {
   },
   searchWrapMobile: {
     padding: "0 10px",
+  },
+  stockUpBtn: {
+    height: 30,
+    minWidth: 92,
+    borderRadius: 8,
+    border: "1px solid rgba(255,146,82,0.48)",
+    background: "rgba(255,146,82,0.08)",
+    color: "#ffb184",
+    fontSize: 13,
+    fontWeight: 800,
+    letterSpacing: 0.5,
+    padding: "0 12px",
+    cursor: "pointer",
+    flex: "0 0 auto",
   },
   searchInput: {
     width: "100%",
@@ -937,24 +1332,24 @@ const styles: Record<string, React.CSSProperties> = {
   headRow: {
     display: "grid",
     gridTemplateColumns:
-      "34px 62px minmax(180px, 1fr) 120px 120px 120px 82px 100px 100px 100px",
-    gap: 10,
+      "28px 54px minmax(140px, 1fr) 86px 92px 92px 78px 78px 82px 82px 92px 92px 84px",
+    gap: 8,
     padding: 0,
     height: 40,
     borderBottom: "1px solid var(--tp-border-color-soft)",
-    fontSize: 11,
+    fontSize: 10,
     opacity: 0.68,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     fontWeight: 700,
     alignItems: "center",
-    paddingInline: 10,
+    paddingInline: 8,
     flex: "0 0 auto",
   },
   list: {
     flex: 1,
     overflowY: "auto",
-    paddingInline: 10,
+    paddingInline: 8,
   },
   listMobile: {
     paddingInline: 0,
@@ -965,16 +1360,20 @@ const styles: Record<string, React.CSSProperties> = {
   lineRow: {
     display: "grid",
     gridTemplateColumns:
-      "34px 62px minmax(180px, 1fr) 120px 120px 120px 82px 100px 100px 100px",
-    gap: 10,
+      "28px 54px minmax(140px, 1fr) 86px 92px 92px 78px 78px 82px 82px 92px 92px 84px",
+    gap: 8,
     alignItems: "center",
-    padding: "10px 0",
+    padding: "9px 0",
     borderBottom: "1px solid var(--tp-border-color-soft)",
-    fontSize: 15,
+    fontSize: 14,
+  },
+  lineRowAlert: {
+    background: "rgba(255,146,82,0.05)",
+    boxShadow: "inset 0 0 0 1px rgba(255,146,82,0.18)",
   },
   thumbWrap: {
-    width: 50,
-    height: 50,
+    width: 42,
+    height: 42,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color-soft)",
     overflow: "hidden",
@@ -1003,30 +1402,30 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    fontSize: 15,
-    padding: "0 8px",
+    fontSize: 14,
+    padding: "0 6px",
   },
   selectCompact: {
+    width: 66,
+    height: 34,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    fontSize: 14,
+    padding: "0 6px",
+    textAlign: "center",
+    textAlignLast: "center",
+  },
+  input: {
     width: 72,
     height: 34,
     borderRadius: 8,
     border: "1px solid var(--tp-border-color)",
     background: "var(--tp-control-bg-soft)",
     color: "var(--tp-text-color)",
-    fontSize: 15,
+    fontSize: 14,
     padding: "0 8px",
-    textAlign: "center",
-    textAlignLast: "center",
-  },
-  input: {
-    width: 84,
-    height: 34,
-    borderRadius: 8,
-    border: "1px solid var(--tp-border-color)",
-    background: "var(--tp-control-bg-soft)",
-    color: "var(--tp-text-color)",
-    fontSize: 15,
-    padding: "0 10px",
     textAlign: "center",
   },
   centerHead: {
@@ -1037,8 +1436,18 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
   },
-  numberCell: { textAlign: "center", fontWeight: 700 },
-  numberCellStrong: { textAlign: "center", fontWeight: 900 },
+  numberCell: { textAlign: "center", fontWeight: 700, fontSize: 14 },
+  numberCellStrong: { textAlign: "center", fontWeight: 900, fontSize: 14 },
+  alertNumberStrong: {
+    textAlign: "center",
+    fontWeight: 900,
+    color: "#ffb184",
+  },
+  alertInput: {
+    border: "1px solid rgba(255,146,82,0.5)",
+    color: "#ffd2ba",
+    background: "rgba(255,146,82,0.08)",
+  },
   zeroStockInput: {
     background: "rgba(222,100,100,0.2)",
     border: "1px solid rgba(222,100,100,0.9)",
@@ -1048,7 +1457,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(222,100,100,0.26)",
     border: "1px solid rgba(222,100,100,0.75)",
     borderRadius: 8,
-    width: 84,
+    width: 72,
     margin: "0 auto",
     minHeight: 34,
     display: "inline-flex",
@@ -1061,7 +1470,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(222,100,100,0.32)",
     border: "1px solid rgba(222,100,100,0.85)",
     borderRadius: 8,
-    width: 84,
+    width: 72,
     margin: "0 auto",
     minHeight: 34,
     display: "inline-flex",
@@ -1093,6 +1502,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--tp-control-bg-soft)",
     display: "grid",
     gap: 9,
+  },
+  mobileCardAlert: {
+    background: "rgba(255,146,82,0.05)",
+    boxShadow: "inset 0 0 0 1px rgba(255,146,82,0.18)",
   },
   mobileCardTop: {
     display: "grid",
@@ -1188,5 +1601,41 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     fontSize: 14,
     fontWeight: 700,
+  },
+  stockUpModal: {
+    width: "min(100%, 720px)",
+    maxHeight: "min(72vh, 760px)",
+  },
+  stockUpHint: {
+    fontSize: 13,
+    opacity: 0.76,
+  },
+  stockUpList: {
+    display: "grid",
+    gap: 10,
+    overflowY: "auto",
+    maxHeight: "50vh",
+    paddingRight: 4,
+  },
+  stockUpRow: {
+    border: "1px solid var(--tp-border-color-soft)",
+    borderRadius: 12,
+    padding: "12px 14px",
+    background: "rgba(255,255,255,0.03)",
+  },
+  stockUpName: {
+    fontSize: 15,
+    fontWeight: 800,
+  },
+  stockUpMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    opacity: 0.74,
+  },
+  stockUpQty: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: 900,
+    color: "#ffb184",
   },
 };

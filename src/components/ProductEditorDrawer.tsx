@@ -27,6 +27,7 @@ type Draft = {
   size: string;
   size_g: string;
   cut: string;
+  thickness: string;
   preparation: string;
   packaging: string;
   temperature: string;
@@ -64,6 +65,7 @@ function buildAutoKeywords(draft: Draft, computedSizeText: string): string {
     draft.long_name,
     draft.type,
     draft.cut,
+    draft.thickness,
     draft.preparation,
     draft.packaging,
     draft.temperature,
@@ -102,6 +104,7 @@ function toDraft(p: DbProduct): Draft {
     size: p.size ?? "",
     size_g: p.size_g != null ? String(p.size_g) : "",
     cut: p.cut ?? "",
+    thickness: p.thickness ?? "",
     preparation: p.preparation ?? "",
     packaging: p.packaging ?? "",
     temperature: p.temperature ?? "",
@@ -437,6 +440,7 @@ export default function ProductEditorDrawer({
         love_points: activeDraft.love_points || null,
         type: activeDraft.type || null,
         cut: activeDraft.cut || null,
+        thickness: activeDraft.thickness || null,
         preparation: activeDraft.preparation || null,
         packaging: activeDraft.packaging || null,
         size: computedSizeText || null,
@@ -607,8 +611,7 @@ export default function ProductEditorDrawer({
           </AppButton>
           <div style={styles.title}>EDIT PRODUCT</div>
           <div style={styles.topStatusWrap}>
-            {saving ? <div style={styles.savingHint}>Saving…</div> : null}
-            {!saving && savedNoticeAt > 0 ? <div style={styles.savedHint}>Saved</div> : null}
+            {!saving && savedNoticeAt > 0 ? <div style={styles.savedHint}>✓</div> : null}
           </div>
         </div>
 
@@ -783,6 +786,15 @@ export default function ProductEditorDrawer({
                   style={styles.input}
                   value={draft.cut}
                   onChange={(e) => setField("cut", e.target.value)}
+                  onBlur={handleAutoSave}
+                />
+              </div>
+              <div style={mainFieldRowStyle}>
+                <label style={mainFieldLabelStyle}>Thickness</label>
+                <input
+                  style={styles.input}
+                  value={draft.thickness}
+                  onChange={(e) => setField("thickness", e.target.value)}
                   onBlur={handleAutoSave}
                 />
               </div>
@@ -1319,23 +1331,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#ff9292",
     fontSize: 15,
   },
-  savingHint: {
-    fontSize: 15,
-    color: "rgba(255,255,255,0.75)",
-  },
   savedHint: {
     height: 24,
-    minWidth: 72,
-    borderRadius: 8,
-    border: "1px solid rgba(157,228,182,0.45)",
+    minWidth: 24,
+    borderRadius: 999,
+    border: "1px solid rgba(157,228,182,0.55)",
     background: "rgba(157,228,182,0.2)",
-    color: "white",
+    color: "#67bf8a",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: "0 10px",
+    padding: "0 8px",
     fontSize: 15,
-    fontWeight: 700,
+    fontWeight: 900,
     letterSpacing: 0.4,
   },
   deleteRow: {

@@ -6,13 +6,13 @@ import {
   TOPBAR_FONT_SIZE,
   TOPBAR_FONT_SIZE_MOBILE,
 } from "@/components/ui";
-import type { OrderListItem } from "@/lib/ordersApi";
+import type { PurchaseListItem } from "@/lib/purchasesApi";
 
 const BACK_BTN_W = 68;
 const TITLE_GAP = 40;
 const STATUS_COL_W = 148;
 
-export type MyOrderItem = OrderListItem;
+export type PurchaseItem = PurchaseListItem;
 
 type Props = {
   isOpen: boolean;
@@ -20,11 +20,10 @@ type Props = {
   onClose: () => void;
   title?: string;
   showSearch?: boolean;
-  orders: MyOrderItem[];
-  selectedOrderId?: string | null;
-  onSelectOrder?: (id: string) => void;
-  onOpenCustomer?: (customerId: string) => void;
-  onCreateOrder?: () => void;
+  purchases: PurchaseItem[];
+  selectedPurchaseId?: string | null;
+  onSelectPurchase?: (id: string) => void;
+  onCreatePurchase?: () => void;
   backgroundStyle?: React.CSSProperties;
 };
 
@@ -38,24 +37,24 @@ function fmtMoney(v: number) {
   return v.toLocaleString("en-PH");
 }
 
-function orderNumber8(id: string) {
+function purchaseNumber8(id: string) {
   const digits = id.replace(/\D/g, "");
   return (digits.slice(-8) || "00000000").padStart(8, "0");
 }
 
-function fmtPickedOrdered(picked: number, ordered: number) {
-  return `${Math.max(0, Number(picked) || 0)} / ${Math.max(0, Number(ordered) || 0)}`;
+function fmtReceivedOrdered(received: number, ordered: number) {
+  return `${Math.max(0, Number(received) || 0)} / ${Math.max(0, Number(ordered) || 0)}`;
 }
 
 function statusTone(value: string): React.CSSProperties {
   const v = String(value || "").toLowerCase();
-  if (v === "completed" || v === "paid" || v === "delivered" || v === "confirmed") {
+  if (v === "completed" || v === "paid" || v === "received" || v === "confirmed") {
     return { color: "#67bf8a", borderColor: "rgba(157,228,182,0.75)", background: "rgba(157,228,182,0.26)" };
   }
-  if (v === "processed" || v === "packed" || v === "in progress" || v === "submitted") {
+  if (v === "processed" || v === "partially received" || v === "submitted") {
     return { color: "#2f99d6", borderColor: "rgba(102,199,255,0.72)", background: "rgba(102,199,255,0.24)" };
   }
-  if (v === "unpaid" || v === "undelivered" || v === "draft" || v === "unpacked") {
+  if (v === "unpaid" || v === "unreceived" || v === "draft") {
     return { color: "#c38a28", borderColor: "rgba(255,207,122,0.76)", background: "rgba(255,207,122,0.26)" };
   }
   return { color: "var(--tp-text-color)", borderColor: "rgba(255,255,255,0.24)", background: "var(--tp-control-bg-soft)" };
@@ -64,22 +63,21 @@ function statusTone(value: string): React.CSSProperties {
 function paymentAmountTone(amountPaid: number | null | undefined, total: number): React.CSSProperties {
   const paid = Number(amountPaid ?? 0);
   const due = paid - Number(total || 0);
-  if (due === 0) return { color: "#67bf8a" };
+  if (Math.abs(due) < 0.005) return { color: "#67bf8a" };
   if (due < 0) return { color: "#de6464" };
   return { color: "#66c7ff" };
 }
 
-export default function MyOrdersDrawer({
+export default function PurchasesDrawer({
   isOpen,
   topOffset,
   onClose,
-  title = "MY ORDERS",
+  title = "ALL PURCHASES",
   showSearch = false,
-  orders,
-  selectedOrderId = null,
-  onSelectOrder,
-  onOpenCustomer,
-  onCreateOrder,
+  purchases,
+  selectedPurchaseId = null,
+  onSelectPurchase,
+  onCreatePurchase,
   backgroundStyle,
 }: Props) {
   const [search, setSearch] = React.useState("");
@@ -93,20 +91,20 @@ export default function MyOrdersDrawer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
   const sorted = React.useMemo(
-    () => [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [orders]
+    () => [...purchases].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [purchases]
   );
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sorted;
     return sorted.filter((o) => {
-      const orderNo = String(o.order_number ?? orderNumber8(o.id)).toLowerCase();
-      const customer = String(o.full_name ?? "").toLowerCase();
+      const purchaseNo = String(o.purchase_number ?? purchaseNumber8(o.id)).toLowerCase();
+      const seller = String(o.seller_name ?? "").toLowerCase();
       const createdAt = fmtDate(o.created_at).toLowerCase();
       const deliveryAt = o.delivery_date ? fmtDate(o.delivery_date).toLowerCase() : "";
       return (
-        orderNo.includes(q) ||
-        customer.includes(q) ||
+        purchaseNo.includes(q) ||
+        seller.includes(q) ||
         createdAt.includes(q) ||
         deliveryAt.includes(q)
       );
@@ -152,9 +150,9 @@ export default function MyOrdersDrawer({
           <div style={{ ...styles.title, ...(isMobileViewport ? styles.titleMobile : null) }}>
             {title}
           </div>
-          {onCreateOrder ? (
+          {onCreatePurchase ? (
             <div style={styles.topCreateWrap}>
-              <AppButton type="button" variant="ghost" style={styles.createBtn} onClick={onCreateOrder}>
+              <AppButton type="button" variant="ghost" style={styles.createBtn} onClick={onCreatePurchase}>
                 CREATE
               </AppButton>
             </div>
@@ -166,17 +164,17 @@ export default function MyOrdersDrawer({
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search order #, customer, or date..."
+                placeholder="Search purchase #, seller, or date..."
                 style={styles.searchInput}
               />
             </div>
           ) : null}
           {!isMobileViewport ? (
             <div style={styles.listHead}>
-              <div>ORDER #</div>
-              <div>ORDER DATE</div>
+              <div>PO #</div>
+              <div>DATE</div>
               <div>DELIVERY DATE</div>
-              <div>CUSTOMER</div>
+              <div>SELLER</div>
               <div>ITEMS</div>
               <div>TOTAL</div>
               <div style={styles.centerCell}>STATUS</div>
@@ -184,30 +182,22 @@ export default function MyOrdersDrawer({
               <div style={styles.centerCell}>DELIVERY</div>
             </div>
           ) : null}
-          <div style={styles.listBody}>
           {filtered.length === 0 ? (
-            <div style={styles.empty}>No orders yet.</div>
+            <div style={styles.empty}>No purchases yet.</div>
           ) : (
             filtered.map((o) =>
               isMobileViewport ? (
-                <div
+                <button
                   key={o.id}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   style={{
                     ...styles.mobileCard,
-                    ...(selectedOrderId === o.id ? styles.listRowActive : null),
+                    ...(selectedPurchaseId === o.id ? styles.listRowActive : null),
                   }}
-                  onClick={() => onSelectOrder?.(o.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelectOrder?.(o.id);
-                    }
-                  }}
+                  onClick={() => onSelectPurchase?.(o.id)}
                 >
                   <div style={styles.mobileCardTop}>
-                    <div style={styles.mobileOrderNo}>#{o.order_number ?? orderNumber8(o.id)}</div>
+                    <div style={styles.mobileOrderNo}>#{o.purchase_number ?? purchaseNumber8(o.id)}</div>
                     <div
                       style={{
                         ...styles.mobileTotal,
@@ -218,27 +208,12 @@ export default function MyOrdersDrawer({
                     </div>
                   </div>
                   <div style={styles.mobileMetaRow}>
-                    <span>Order: {fmtDate(o.created_at)}</span>
+                    <span>PO Date: {fmtDate(o.created_at)}</span>
                     <span>Delivery: {o.delivery_date ? fmtDate(o.delivery_date) : "—"}</span>
                   </div>
                   <div style={styles.mobileMetaRow}>
-                    <span style={styles.customerCell}>
-                      {o.customer_id && onOpenCustomer ? (
-                        <button
-                          type="button"
-                          style={styles.customerLink}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpenCustomer(o.customer_id as string);
-                          }}
-                        >
-                          {o.full_name || "—"}
-                        </button>
-                      ) : (
-                        o.full_name || "—"
-                      )}
-                    </span>
-                    <span>{fmtPickedOrdered(o.packed_qty_total, o.total_qty)}</span>
+                    <span style={styles.customerCell}>{o.seller_name || "—"}</span>
+                    <span>{fmtReceivedOrdered(o.received_qty_total, o.total_qty)}</span>
                   </div>
                   <div style={styles.mobilePillsRow}>
                     <span style={{ ...styles.rowStatusPill, ...styles.rowStatusPillMobile, ...statusTone(o.status) }}>
@@ -251,55 +226,32 @@ export default function MyOrdersDrawer({
                       {o.delivery_status}
                     </span>
                   </div>
-                </div>
+                </button>
               ) : (
-                <div
+                <button
                   key={o.id}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   style={{
                     ...styles.listRow,
-                    ...(selectedOrderId === o.id ? styles.listRowActive : null),
+                    ...(selectedPurchaseId === o.id ? styles.listRowActive : null),
                   }}
-                  onClick={() => onSelectOrder?.(o.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelectOrder?.(o.id);
-                    }
-                  }}
+                  onClick={() => onSelectPurchase?.(o.id)}
                 >
-                  <div>{o.order_number ?? orderNumber8(o.id)}</div>
+                  <div>{o.purchase_number ?? purchaseNumber8(o.id)}</div>
                   <div>{fmtDate(o.created_at)}</div>
                   <div>{o.delivery_date ? fmtDate(o.delivery_date) : "—"}</div>
-                  <div style={styles.customerCell}>
-                    {o.customer_id && onOpenCustomer ? (
-                      <button
-                        type="button"
-                        style={styles.customerLink}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenCustomer(o.customer_id as string);
-                        }}
-                      >
-                        {o.full_name || "—"}
-                      </button>
-                    ) : (
-                      o.full_name || "—"
-                    )}
-                  </div>
-                  <div>{fmtPickedOrdered(o.packed_qty_total, o.total_qty)}</div>
+                  <div style={styles.customerCell}>{o.seller_name || "—"}</div>
+                  <div>{fmtReceivedOrdered(o.received_qty_total, o.total_qty)}</div>
                   <div style={paymentAmountTone(o.amount_paid, o.total_selling_price)}>
                     ₱ {fmtMoney(o.total_selling_price)}
                   </div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.status) }}>{o.status}</span></div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.paid_status) }}>{o.paid_status}</span></div>
                   <div style={styles.centerCell}><span style={{ ...styles.rowStatusPill, ...statusTone(o.delivery_status) }}>{o.delivery_status}</span></div>
-                </div>
+                </button>
               )
             )
           )}
-          </div>
         </div>
       </aside>
     </>
@@ -328,11 +280,9 @@ const styles: Record<string, React.CSSProperties> = {
   titleMobile: { fontSize: TOPBAR_FONT_SIZE_MOBILE, fontWeight: 700, letterSpacing: 0.2 },
   content: {
     flex: 1,
-    overflow: "hidden",
+    overflowY: "auto",
     padding: `6px 0 48px ${BACK_BTN_W + TITLE_GAP}px`,
     color: "var(--tp-text-color)",
-    display: "flex",
-    flexDirection: "column",
   },
   contentMobile: { padding: "8px 12px 20px" },
   searchWrap: {
@@ -371,13 +321,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 0 8px 10px",
     borderBottom: "1px solid var(--tp-border-color-soft)",
     letterSpacing: 1,
-    flex: "0 0 auto",
-  },
-  listBody: {
-    flex: 1,
-    overflowY: "auto",
-    minHeight: 0,
-    paddingRight: 8,
   },
   listRow: {
     width: "100%",
@@ -397,17 +340,6 @@ const styles: Record<string, React.CSSProperties> = {
   listRowActive: { background: "rgba(58,170,245,0.1)" },
   empty: { padding: "16px 10px", opacity: 0.75 },
   customerCell: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.92 },
-  customerLink: {
-    padding: 0,
-    border: "none",
-    background: "transparent",
-    color: "var(--tp-text-color)",
-    font: "inherit",
-    textAlign: "left",
-    cursor: "pointer",
-    textDecoration: "underline",
-    textUnderlineOffset: 3,
-  },
   rowStatusPill: {
     height: 30,
     width: "100%",

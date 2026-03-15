@@ -624,6 +624,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     fontWeight: 800,
     letterSpacing: 0.2,
+    lineHeight: 1.25,
+    minHeight: "2.5em",
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden",
     marginBottom: 10,
   },
   titleCompact: {

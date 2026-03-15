@@ -12,7 +12,11 @@ import CheckoutDrawer from "@/components/CheckoutDrawer";
 import AuthModal from "@/components/AuthModal";
 import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
+import CustomersDrawer from "@/components/CustomersDrawer";
+import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
+import PurchasesDrawer, { type PurchaseItem } from "@/components/PurchasesDrawer";
+import PurchaseDrawer from "@/components/PurchaseDrawer";
 import InventoryDrawer, { type InventoryLine } from "@/components/InventoryDrawer";
 import AnalyticsDrawer from "@/components/AnalyticsDrawer";
 import ZoneStyleModal, {
@@ -20,11 +24,12 @@ import ZoneStyleModal, {
   type ThemeColorsDraft,
   type BannerDraft,
   type CheckoutPaymentDraft,
+  type FontOption,
 } from "@/components/ZoneStyleModal";
 import LogoEditorModal from "@/components/LogoEditorModal";
 
-import { formatMoney } from "@/lib/money";
-import { getSessionId } from "@/lib/session";
+import { calculateSteakCredits, formatMoney } from "@/lib/money";
+import { getSessionId, resetSessionId } from "@/lib/session";
 import {
   fetchProducts,
   fetchProductImages,
@@ -36,11 +41,14 @@ import { fetchCartView, setCartLineQty } from "@/lib/cartApi";
 import * as Cart from "@/lib/cart";
 import {
   addOrderLinesByAdmin,
+  createOrderByAdmin,
   deleteOrderByAdmin,
   fetchOrderDetail,
   fetchOrders,
+  hydrateOrderLineFinancialSnapshots,
   updateOrderAmountPaid,
   updateOrderAdminFields,
+  updateOrderLineUnitPrice,
   updateOrderPaymentProof,
   updateOrderLinePackedQty,
   updateOrderStatuses,
@@ -48,7 +56,36 @@ import {
   type OrderDetail,
   type OrderStatusPatch,
 } from "@/lib/ordersApi";
+import {
+  addPurchaseLinesByAdmin,
+  createPurchaseByAdmin,
+  deletePurchaseLineByAdmin,
+  deletePurchaseByAdmin,
+  fetchPurchaseDetail,
+  fetchPurchases,
+  updatePurchaseAdminFields,
+  updatePurchaseAmountPaid,
+  updatePurchaseLineReceivedQty,
+  updatePurchaseLineQty,
+  updatePurchaseLineUnitPrice,
+  updatePurchasePaymentProof,
+  updatePurchaseStatuses,
+  type PurchaseAdminPatch,
+  type PurchaseDetail,
+  type PurchaseStatusPatch,
+} from "@/lib/purchasesApi";
 import { supabase } from "@/lib/supabase";
+import {
+  adjustCustomerSteakCredits,
+  fetchAdminCustomerDetail,
+  ensureCustomerRecord,
+  fetchAdminCustomers,
+  fetchCustomerById,
+  linkProfileToCustomer,
+  updateCustomerRecord,
+  type CustomerAdminItem,
+  type CustomerAdminDetail,
+} from "@/lib/customersApi";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 
 type Panel = null | "product" | "checkout" | "edit";
@@ -81,6 +118,42 @@ const DEFAULT_ZONE_STYLES_BY_MODE: Record<"dark" | "light", Record<ZoneName, Zon
   },
 };
 
+const FONT_OPTIONS: FontOption[] = [
+  { id: "inter", name: "Inter", style: "Modern Sans" },
+  { id: "roboto", name: "Roboto", style: "Clean Sans" },
+  { id: "montserrat", name: "Montserrat", style: "Geometric Sans" },
+  { id: "poppins", name: "Poppins", style: "Rounded Sans" },
+  { id: "lato", name: "Lato", style: "Humanist Sans" },
+  { id: "playfair_display", name: "Playfair Display", style: "Classic Serif" },
+  { id: "oswald", name: "Oswald", style: "Condensed Sans" },
+  { id: "permanent_marker", name: "Permanent Marker", style: "Chalk/Paint" },
+  { id: "rock_salt", name: "Rock Salt", style: "Chalk/Paint" },
+  { id: "caveat_brush", name: "Caveat Brush", style: "Chalk/Paint" },
+  { id: "patrick_hand", name: "Patrick Hand", style: "Chalk/Paint - Natural Handwriting" },
+  { id: "kalam", name: "Kalam", style: "Chalk/Paint - Natural Handwriting" },
+  { id: "architects_daughter", name: "Architects Daughter", style: "Chalk/Paint - Natural Handwriting" },
+  { id: "handlee", name: "Handlee", style: "Chalk/Paint - Natural Handwriting" },
+  { id: "gloria_hallelujah", name: "Gloria Hallelujah", style: "Chalk/Paint - Natural Handwriting" },
+];
+
+const FONT_FAMILY_BY_ID: Record<string, string> = {
+  inter: "var(--font-inter), Arial, Helvetica, sans-serif",
+  roboto: "var(--font-roboto), Arial, Helvetica, sans-serif",
+  montserrat: "var(--font-montserrat), Arial, Helvetica, sans-serif",
+  poppins: "var(--font-poppins), Arial, Helvetica, sans-serif",
+  lato: "var(--font-lato), Arial, Helvetica, sans-serif",
+  playfair_display: "var(--font-playfair-display), Georgia, 'Times New Roman', serif",
+  oswald: "var(--font-oswald), Arial, Helvetica, sans-serif",
+  permanent_marker: "var(--font-permanent-marker), 'Comic Sans MS', cursive",
+  rock_salt: "var(--font-rock-salt), 'Comic Sans MS', cursive",
+  caveat_brush: "var(--font-caveat-brush), 'Comic Sans MS', cursive",
+  patrick_hand: "var(--font-patrick-hand), 'Comic Sans MS', cursive",
+  kalam: "var(--font-kalam), 'Comic Sans MS', cursive",
+  architects_daughter: "var(--font-architects-daughter), 'Comic Sans MS', cursive",
+  handlee: "var(--font-handlee), 'Comic Sans MS', cursive",
+  gloria_hallelujah: "var(--font-gloria-hallelujah), 'Comic Sans MS', cursive",
+};
+
 const UI_ASSETS_BUCKET = "ui-assets";
 
 type BrandingRow = {
@@ -106,6 +179,8 @@ function normalizeInventorySnapshot(row: Record<string, unknown>): {
   qty_on_hand: number;
   qty_allocated: number;
   qty_available: number;
+  reorder_point: number;
+  target_stock: number;
 } {
   const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
   const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
@@ -113,10 +188,14 @@ function normalizeInventorySnapshot(row: Record<string, unknown>): {
   const qtyAvailable = Number.isFinite(rawAvailable)
     ? Math.max(0, rawAvailable)
     : Math.max(qtyOnHand - qtyAllocated, 0);
+  const reorderPoint = Math.max(0, Number(row.reorder_point ?? row.low_stock_threshold ?? 0));
+  const targetStock = Math.max(reorderPoint, Number(row.target_stock ?? 0));
   return {
     qty_on_hand: qtyOnHand,
     qty_allocated: qtyAllocated,
     qty_available: qtyAvailable,
+    reorder_point: reorderPoint,
+    target_stock: targetStock,
   };
 }
 
@@ -218,6 +297,8 @@ export default function Page() {
   const [detailsOpen, setDetailsOpen] = React.useState<boolean>(false);
   const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
   const [allOrdersOpen, setAllOrdersOpen] = React.useState<boolean>(false);
+  const [allCustomersOpen, setAllCustomersOpen] = React.useState<boolean>(false);
+  const [allPurchasesOpen, setAllPurchasesOpen] = React.useState<boolean>(false);
   const [inventoryOpen, setInventoryOpen] = React.useState<boolean>(false);
   const [analyticsOpen, setAnalyticsOpen] = React.useState<boolean>(false);
   const [inventoryRows, setInventoryRows] = React.useState<InventoryLine[]>([]);
@@ -225,6 +306,11 @@ export default function Page() {
   const [editMode, setEditMode] = React.useState<boolean>(false);
   const [myOrders, setMyOrders] = React.useState<MyOrderItem[]>([]);
   const [allOrders, setAllOrders] = React.useState<MyOrderItem[]>([]);
+  const [allCustomers, setAllCustomers] = React.useState<CustomerAdminItem[]>([]);
+  const [allPurchases, setAllPurchases] = React.useState<PurchaseItem[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = React.useState<string | null>(null);
+  const [selectedCustomerDetail, setSelectedCustomerDetail] = React.useState<CustomerAdminDetail | null>(null);
+  const [loadingCustomerDetail, setLoadingCustomerDetail] = React.useState<boolean>(false);
   const [selectedMyOrderId, setSelectedMyOrderId] = React.useState<string | null>(null);
   const [selectedAllOrderId, setSelectedAllOrderId] = React.useState<string | null>(null);
   const [orderDrawerSource, setOrderDrawerSource] = React.useState<"my" | "all" | "public" | null>(null);
@@ -232,6 +318,9 @@ export default function Page() {
     null
   );
   const [loadingOrderDetail, setLoadingOrderDetail] = React.useState<boolean>(false);
+  const [selectedPurchaseId, setSelectedPurchaseId] = React.useState<string | null>(null);
+  const [selectedPurchaseDetail, setSelectedPurchaseDetail] = React.useState<PurchaseDetail | null>(null);
+  const [loadingPurchaseDetail, setLoadingPurchaseDetail] = React.useState<boolean>(false);
   const [submittingCheckout, setSubmittingCheckout] = React.useState<boolean>(false);
   const [adminAllProductsMode, setAdminAllProductsMode] = React.useState<boolean>(false);
   const [zoneStylesByMode, setZoneStylesByMode] = React.useState<
@@ -266,6 +355,8 @@ export default function Page() {
         button_bg_color: "transparent",
         checkbox_color: "#cfd6dd",
         background_color: "#000000",
+        font_family: "inter",
+        font_scale: 1,
       },
       light: {
         accent_color: "#b89958",
@@ -275,6 +366,8 @@ export default function Page() {
         button_bg_color: "transparent",
         checkbox_color: "#6c747c",
         background_color: "#ffffff",
+        font_family: "inter",
+        font_scale: 1,
       },
     }),
     []
@@ -343,6 +436,9 @@ export default function Page() {
   const [customer, setCustomer] = React.useState<CustomerDraft>(blankCustomer);
   const [createAccountFromDetails, setCreateAccountFromDetails] =
     React.useState<boolean>(false);
+  const [createAccountPassword, setCreateAccountPassword] = React.useState("");
+  const [createAccountPasswordConfirm, setCreateAccountPasswordConfirm] = React.useState("");
+  const [createAccountError, setCreateAccountError] = React.useState("");
   const [saveAddressToProfile, setSaveAddressToProfile] = React.useState<boolean>(false);
   const [profileHasAddress, setProfileHasAddress] = React.useState<boolean>(false);
   const [profileAddress, setProfileAddress] = React.useState({
@@ -374,9 +470,36 @@ export default function Page() {
   const desktopSideColWidthCss = `calc((var(--tp-rail-width) - ${desktopCenterColWidthCss}) / 2 - ${desktopNavGap}px)`;
   const pendingRouteRef = React.useRef<{ path: string; search: string } | null>(null);
   const isApplyingRouteRef = React.useRef(false);
+  const drawerRouteHistoryRef = React.useRef<string[]>([]);
   const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
     setCustomer(next);
   }, []);
+  const getCurrentRoute = React.useCallback(() => {
+    if (typeof window === "undefined") return "/shop";
+    return `${window.location.pathname}${window.location.search}`;
+  }, []);
+  const pushAppRoute = React.useCallback(
+    (next: string, opts?: { rememberCurrent?: boolean; replace?: boolean }) => {
+      if (typeof window === "undefined") return;
+      const current = `${window.location.pathname}${window.location.search}`;
+      if (current === next) return;
+      if (opts?.rememberCurrent !== false) {
+        const stack = drawerRouteHistoryRef.current;
+        if (stack[stack.length - 1] !== current) {
+          stack.push(current);
+          if (stack.length > 50) {
+            stack.splice(0, stack.length - 50);
+          }
+        }
+      }
+      if (opts?.replace) {
+        window.history.replaceState({}, "", next);
+      } else {
+        window.history.pushState({}, "", next);
+      }
+    },
+    []
+  );
   const formatSupabaseError = React.useCallback((e: unknown, fallback: string) => {
     if (!e || typeof e !== "object") return fallback;
     const err = e as {
@@ -477,7 +600,7 @@ export default function Page() {
       const inventoryResult = ids.length
         ? await supabase
             .from("inventory")
-            .select("product_id,qty_on_hand,qty_allocated,qty_available")
+            .select("product_id,qty_on_hand,qty_allocated,qty_available,reorder_point,target_stock")
             .in("product_id", ids)
         : { data: [], error: null as unknown };
       if (inventoryResult.error) {
@@ -485,7 +608,7 @@ export default function Page() {
       }
       const inventoryById = new Map<
         string,
-        { qty_on_hand: number; qty_allocated: number; qty_available: number }
+        { qty_on_hand: number; qty_allocated: number; qty_available: number; reorder_point: number; target_stock: number }
       >();
       for (const row of (inventoryResult.data ?? []) as Array<Record<string, unknown>>) {
         const id = String(row.product_id ?? "");
@@ -515,6 +638,8 @@ export default function Page() {
           qty_on_hand: inventory?.qty_on_hand ?? 0,
           qty_allocated: inventory?.qty_allocated ?? 0,
           qty_available: inventory?.qty_available ?? 0,
+          reorder_point: inventory?.reorder_point ?? 0,
+          target_stock: inventory?.target_stock ?? 0,
         };
       });
 
@@ -626,29 +751,47 @@ export default function Page() {
 
   React.useEffect(() => {
     const loadThemeColors = async () => {
-      const { data, error } = await supabase
+      const withFont = await supabase
         .from("ui_theme_colors")
         .select(
-          "mode,accent_color,text_color,line_color,button_border_color,button_bg_color,checkbox_color,background_color"
+          "mode,accent_color,text_color,line_color,button_border_color,button_bg_color,checkbox_color,background_color,font_family"
         );
+      let data: Array<Record<string, unknown>> | null =
+        (withFont.data as Array<Record<string, unknown>> | null) ?? null;
+      let error = withFont.error;
+      if (error) {
+        const fallback = await supabase
+          .from("ui_theme_colors")
+          .select(
+            "mode,accent_color,text_color,line_color,button_border_color,button_bg_color,checkbox_color,background_color"
+          );
+        data = (fallback.data as Array<Record<string, unknown>> | null) ?? null;
+        error = fallback.error;
+      }
       if (error || !data || data.length === 0) return;
       setThemeColorsByMode((prev) => {
         const next = {
           dark: { ...DEFAULT_THEME_COLORS_BY_MODE.dark },
           light: { ...DEFAULT_THEME_COLORS_BY_MODE.light },
         };
-        for (const row of data as ThemeColorsRow[]) {
-          if (row.mode !== "dark" && row.mode !== "light") continue;
-          next[row.mode] = {
-            ...next[row.mode],
-            accent_color: row.accent_color ?? next[row.mode].accent_color,
-            text_color: row.text_color ?? next[row.mode].text_color,
-            line_color: row.line_color ?? next[row.mode].line_color,
+        for (const row of data) {
+          const mode = String(row.mode ?? "");
+          if (mode !== "dark" && mode !== "light") continue;
+          next[mode] = {
+            ...next[mode],
+            accent_color: String(row.accent_color ?? next[mode].accent_color),
+            text_color: String(row.text_color ?? next[mode].text_color),
+            line_color: String(row.line_color ?? next[mode].line_color),
             button_border_color:
-              row.button_border_color ?? next[row.mode].button_border_color,
-            button_bg_color: row.button_bg_color ?? next[row.mode].button_bg_color,
-            checkbox_color: row.checkbox_color ?? next[row.mode].checkbox_color,
-            background_color: row.background_color ?? next[row.mode].background_color,
+              String(row.button_border_color ?? next[mode].button_border_color),
+            button_bg_color: String(row.button_bg_color ?? next[mode].button_bg_color),
+            checkbox_color: String(row.checkbox_color ?? next[mode].checkbox_color),
+            background_color: String(row.background_color ?? next[mode].background_color),
+            font_family: String(row.font_family ?? next[mode].font_family ?? "inter"),
+            font_scale: Math.min(
+              1.3,
+              Math.max(1, Number(row.font_scale ?? next[mode].font_scale ?? 1))
+            ),
           };
         }
         try {
@@ -704,6 +847,13 @@ export default function Page() {
     root.style.setProperty("--tp-cta-fg", themeColors.text_color || "#ffffff");
     root.style.setProperty("--tp-checkbox-color", themeColors.checkbox_color || "#cfd6dd");
     root.style.setProperty("--tp-page-bg", themeColors.background_color || "#000000");
+    const fontId = String(themeColors.font_family || "inter");
+    const nextFontFamily = FONT_FAMILY_BY_ID[fontId] || FONT_FAMILY_BY_ID.inter;
+    root.style.setProperty("--tp-font-family", nextFontFamily);
+    document.body.style.fontFamily = nextFontFamily;
+    const fontScale = Math.min(1.3, Math.max(1, Number(themeColors.font_scale ?? 1)));
+    root.style.setProperty("--tp-font-scale", String(fontScale));
+    root.style.fontSize = `${(16 * fontScale).toFixed(2)}px`;
   }, [hexToRgba, themeColors]);
 
   React.useEffect(() => {
@@ -779,15 +929,23 @@ export default function Page() {
       const { data } = await supabase
         .from("profiles")
         .select(
-          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,delivery_note,country"
+          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,delivery_note,country,customer_id"
         )
         .eq("id", authUserId)
         .maybeSingle();
 
-      const firstName = String(data?.first_name ?? "").trim();
-      const lastName = String(data?.last_name ?? "").trim();
+      const linkedCustomerId = data?.customer_id ? String(data.customer_id) : "";
+      const linkedCustomer = linkedCustomerId
+        ? await fetchCustomerById(linkedCustomerId).catch(() => null)
+        : null;
+
+      const firstName =
+        String(data?.first_name ?? "").trim() || String(linkedCustomer?.first_name ?? "").trim();
+      const lastName =
+        String(data?.last_name ?? "").trim() || String(linkedCustomer?.last_name ?? "").trim();
       const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
-      const profilePhone = String(data?.phone ?? "").trim();
+      const profilePhone =
+        String(data?.phone ?? "").trim() || String(linkedCustomer?.phone ?? "").trim();
       const deliveryNote = String(data?.delivery_note ?? "").trim();
       const hasAddress =
         String(data?.address_line1 ?? "").trim().length > 0 &&
@@ -1059,6 +1217,8 @@ export default function Page() {
         button_bg_color: String(next.button_bg_color || current.button_bg_color || "").trim(),
         checkbox_color: String(next.checkbox_color || current.checkbox_color || "").trim(),
         background_color: String(next.background_color || current.background_color || "").trim(),
+        font_family: String(next.font_family || current.font_family || "inter").trim() || "inter",
+        font_scale: Math.min(1.3, Math.max(1, Number(next.font_scale ?? current.font_scale ?? 1))),
       };
 
       setThemeColorsByMode((prev) => {
@@ -1224,10 +1384,17 @@ export default function Page() {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setAllCustomersOpen(false);
+    setAllPurchasesOpen(false);
     setInventoryOpen(false);
     setAnalyticsOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
+    setSelectedCustomerId(null);
+    setSelectedCustomerDetail(null);
+    setLoadingCustomerDetail(false);
+    setSelectedPurchaseId(null);
+    setSelectedPurchaseDetail(null);
   }, []);
 
   React.useEffect(() => {
@@ -1245,9 +1412,30 @@ export default function Page() {
       detailsOpen ||
       ordersOpen ||
       allOrdersOpen ||
+      allCustomersOpen ||
+      allPurchasesOpen ||
       inventoryOpen ||
-      !!orderDrawerSource,
-    [allOrdersOpen, detailsOpen, inventoryOpen, orderDrawerSource, ordersOpen, panel]
+      analyticsOpen ||
+      !!orderDrawerSource ||
+      loadingCustomerDetail ||
+      !!selectedCustomerDetail ||
+      loadingPurchaseDetail ||
+      !!selectedPurchaseDetail,
+    [
+      allOrdersOpen,
+      allCustomersOpen,
+      allPurchasesOpen,
+      analyticsOpen,
+      detailsOpen,
+      inventoryOpen,
+      loadingCustomerDetail,
+      loadingPurchaseDetail,
+      orderDrawerSource,
+      ordersOpen,
+      panel,
+      selectedCustomerDetail,
+      selectedPurchaseDetail,
+    ]
   );
 
   React.useEffect(() => {
@@ -1453,6 +1641,50 @@ React.useEffect(() => {
     return products.find((p) => String(p.id) === selectedId) ?? null;
   }, [products, selectedId]);
 
+  const sameCategoryProducts = React.useMemo(() => {
+    if (!selectedProduct) return [];
+    const currentId = String(selectedProduct.id);
+    const baseType = String(selectedProduct.type ?? "").trim().toLowerCase();
+    const baseCut = String(selectedProduct.cut ?? "").trim().toLowerCase();
+    return products
+      .filter((p) => {
+        const id = String(p.id);
+        if (!id || id === currentId) return false;
+        const status = String(p.status ?? "").trim().toLowerCase();
+        if (status === "archived") return false;
+        const type = String(p.type ?? "").trim().toLowerCase();
+        const cut = String(p.cut ?? "").trim().toLowerCase();
+        if (baseType && type === baseType) return true;
+        if (baseCut && cut === baseCut) return true;
+        return false;
+      })
+      .slice(0, 8);
+  }, [products, selectedProduct]);
+
+  const popularProducts = React.useMemo(() => {
+    if (!selectedProduct) return [];
+    const currentId = String(selectedProduct.id);
+    const relatedIds = new Set(sameCategoryProducts.map((p) => String(p.id)));
+    return products
+      .filter((p) => {
+        const id = String(p.id);
+        if (!id || id === currentId) return false;
+        if (relatedIds.has(id)) return false;
+        const status = String(p.status ?? "").trim().toLowerCase();
+        return status !== "archived";
+      })
+      .slice()
+      .sort((a, b) => {
+        const aStock = Number(a.qty_on_hand ?? 0);
+        const bStock = Number(b.qty_on_hand ?? 0);
+        if (aStock !== bStock) return bStock - aStock;
+        const aSort = Number(a.sort ?? Number.MAX_SAFE_INTEGER);
+        const bSort = Number(b.sort ?? Number.MAX_SAFE_INTEGER);
+        return aSort - bSort;
+      })
+      .slice(0, 8);
+  }, [products, sameCategoryProducts, selectedProduct]);
+
   const cartItemsForDisplay = React.useMemo(() => {
     const enriched = cartItems.map((item) => {
       const product = products.find((p) => String(p.id) === item.productId);
@@ -1508,6 +1740,7 @@ React.useEffect(() => {
 
   const logout = React.useCallback(async () => {
     await supabase.auth.signOut();
+    sessionIdRef.current = resetSessionId();
     setAuthLabel(null);
     setAuthProfileName("");
     setAuthUserId(null);
@@ -1519,19 +1752,28 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setAllCustomersOpen(false);
+    setAllPurchasesOpen(false);
     setInventoryOpen(false);
     setMyOrders([]);
     setAllOrders([]);
+    setAllCustomers([]);
+    setAllPurchases([]);
     setInventoryRows([]);
     setSelectedMyOrderId(null);
     setSelectedAllOrderId(null);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
+    setSelectedPurchaseId(null);
+    setSelectedPurchaseDetail(null);
     setProfileHasAddress(false);
     setSaveAddressToProfile(false);
     setCreateAccountFromDetails(false);
     setCustomer(blankCustomer());
     setPaymentFile(null);
+    setCart({});
+    setCartItems([]);
+    setTotals({ totalUnits: 0, subtotal: 0 });
     setProfileAddress({
       attention_to: "",
       line1: "",
@@ -1572,6 +1814,7 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setAllPurchasesOpen(false);
     setInventoryOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
@@ -1593,6 +1836,7 @@ React.useEffect(() => {
       setDetailsOpen(false);
       setOrdersOpen(false);
       setAllOrdersOpen(false);
+    setAllPurchasesOpen(false);
       setInventoryOpen(false);
       setOrderDrawerSource(null);
       setSelectedOrderDetail(null);
@@ -1627,6 +1871,7 @@ React.useEffect(() => {
     setDetailsOpen(false);
     setOrdersOpen(false);
     setAllOrdersOpen(false);
+    setAllPurchasesOpen(false);
     setOrderDrawerSource(null);
     setSelectedOrderDetail(null);
     setPanel("edit");
@@ -1696,10 +1941,8 @@ React.useEffect(() => {
         window.scrollTo({ top: windowScrollTopRef.current, left: 0, behavior: "auto" });
       }
     });
-    if (typeof window !== "undefined") {
-      window.history.pushState({}, "", "/shop");
-    }
-  }, [closePrimaryDrawers]);
+    pushAppRoute("/shop");
+  }, [closePrimaryDrawers, pushAppRoute]);
 
   const openCheckout = React.useCallback(async (opts?: { skipNavigate?: boolean }) => {
     setCheckoutOpening(true);
@@ -1712,13 +1955,20 @@ React.useEffect(() => {
       const { data } = await supabase
         .from("profiles")
         .select(
-          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,country,delivery_note"
+          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,country,delivery_note,customer_id"
         )
         .eq("id", authUserId)
         .maybeSingle();
 
-      const firstName = String(data?.first_name ?? "").trim();
-      const lastName = String(data?.last_name ?? "").trim();
+      const linkedCustomerId = data?.customer_id ? String(data.customer_id) : "";
+      const linkedCustomer = linkedCustomerId
+        ? await fetchCustomerById(linkedCustomerId).catch(() => null)
+        : null;
+
+      const firstName =
+        String(data?.first_name ?? "").trim() || String(linkedCustomer?.first_name ?? "").trim();
+      const lastName =
+        String(data?.last_name ?? "").trim() || String(linkedCustomer?.last_name ?? "").trim();
       const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
       const hasAddress =
         String(data?.address_line1 ?? "").trim().length > 0 &&
@@ -1746,7 +1996,7 @@ React.useEffect(() => {
         email: prev.placed_for_someone_else ? prev.email : prev.email || authEmail || "",
         phone: prev.placed_for_someone_else
           ? prev.phone
-          : prev.phone || String(data?.phone ?? "").trim() || authPhone || "",
+          : prev.phone || String(data?.phone ?? "").trim() || String(linkedCustomer?.phone ?? "").trim() || authPhone || "",
         attention_to: prev.placed_for_someone_else
           ? prev.attention_to
           : prev.attention_to || String(data?.attention_to ?? "").trim(),
@@ -1782,6 +2032,7 @@ React.useEffect(() => {
       setDetailsOpen(false);
       setOrdersOpen(false);
       setAllOrdersOpen(false);
+    setAllPurchasesOpen(false);
       setInventoryOpen(false);
       setOrderDrawerSource(null);
       setSelectedOrderDetail(null);
@@ -1791,23 +2042,23 @@ React.useEffect(() => {
       }
       const profileTask = loadProfileForCheckout();
       setPanel("checkout");
-      if (!opts?.skipNavigate && typeof window !== "undefined") {
-        window.history.pushState({}, "", "/checkout");
+      if (!opts?.skipNavigate) {
+        pushAppRoute("/checkout");
       }
       await profileTask;
     } finally {
       setCheckoutOpening(false);
     }
-  }, [authEmail, authPhone, authUserId, hasCartQtyOverLimit]);
+  }, [authEmail, authPhone, authUserId, hasCartQtyOverLimit, pushAppRoute]);
 
   const openProfileDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     closePrimaryDrawers();
     setCartOpen(false);
     setDetailsOpen(true);
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/profile");
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/profile");
     }
-  }, [closePrimaryDrawers]);
+  }, [closePrimaryDrawers, pushAppRoute]);
 
   const loadAndSelectOrder = React.useCallback(
     async (orderId: string, opts?: { retries?: number; delayMs?: number }) => {
@@ -1897,6 +2148,58 @@ React.useEffect(() => {
               ),
             }
           : prev
+      );
+    },
+    []
+  );
+
+  const handleOrderUnitPriceChange = React.useCallback(
+    async (orderId: string, orderLineId: string, unitPrice: number | null) => {
+      const result = await updateOrderLineUnitPrice(orderLineId, unitPrice);
+      const nextUnitPrice = Number(result.unitPrice ?? 0);
+      const nextLineTotal = Number(result.lineTotal ?? 0);
+      const nextLineProfit =
+        result.lineProfit === null || result.lineProfit === undefined
+          ? null
+          : Number(result.lineProfit);
+      const nextSubtotal = Number(result.subtotal ?? 0);
+      const nextTotal = Number(result.total ?? 0);
+      const nextTotalQty = Number(result.totalQty ?? 0);
+
+      setSelectedOrderDetail((prev) =>
+        prev && prev.id === orderId
+          ? {
+              ...prev,
+              total_qty: nextTotalQty,
+              subtotal: nextSubtotal,
+              total_selling_price: nextTotal,
+              items: prev.items.map((it) =>
+                it.id === orderLineId
+                  ? {
+                      ...it,
+                      unit_price: nextUnitPrice,
+                      line_total: nextLineTotal,
+                      line_profit: nextLineProfit,
+                    }
+                  : it
+              ),
+            }
+          : prev
+      );
+
+      setMyOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? { ...row, total_qty: nextTotalQty, subtotal: nextSubtotal, total_selling_price: nextTotal }
+            : row
+        )
+      );
+      setAllOrders((prev) =>
+        prev.map((row) =>
+          row.id === orderId
+            ? { ...row, total_qty: nextTotalQty, subtotal: nextSubtotal, total_selling_price: nextTotal }
+            : row
+        )
       );
     },
     []
@@ -2008,6 +2311,284 @@ React.useEffect(() => {
     []
   );
 
+  const loadAndSelectPurchase = React.useCallback(async (purchaseId: string) => {
+    setLoadingPurchaseDetail(true);
+    setSelectedPurchaseDetail(null);
+    try {
+      const detail = await fetchPurchaseDetail(purchaseId);
+      setSelectedPurchaseDetail(detail);
+      return detail;
+    } finally {
+      setLoadingPurchaseDetail(false);
+    }
+  }, []);
+
+  const handlePurchaseStatusChange = React.useCallback(
+    async (purchaseId: string, patch: PurchaseStatusPatch) => {
+      await updatePurchaseStatuses(purchaseId, patch);
+      const resolvedStatus =
+        String(patch.delivery_status ?? "").toLowerCase() === "received"
+          ? "completed"
+          : patch.status;
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? { ...row, ...patch, status: resolvedStatus ?? row.status }
+            : row
+        )
+      );
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              status: resolvedStatus ?? prev.status,
+              paid_status: patch.paid_status ?? prev.paid_status,
+              delivery_status: patch.delivery_status ?? prev.delivery_status,
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handlePurchaseReceivedQtyChange = React.useCallback(
+    async (purchaseLineId: string, receivedQty: number | null) => {
+      await updatePurchaseLineReceivedQty(purchaseLineId, receivedQty);
+      setSelectedPurchaseDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((it) =>
+                it.id === purchaseLineId ? { ...it, received_qty: receivedQty } : it
+              ),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handlePurchaseUnitPriceChange = React.useCallback(
+    async (purchaseId: string, purchaseLineId: string, unitPrice: number | null) => {
+      const result = await updatePurchaseLineUnitPrice(purchaseLineId, unitPrice);
+      const nextUnitPrice = Number(result.unitPrice ?? 0);
+      const nextLineTotal = Number(result.lineTotal ?? 0);
+      const nextSubtotal = Number(result.subtotal ?? 0);
+      const nextTotal = Number(result.total ?? 0);
+      const nextTotalQty = Number(result.totalQty ?? 0);
+
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              total_qty: nextTotalQty,
+              subtotal: nextSubtotal,
+              total_selling_price: nextTotal,
+              items: prev.items.map((it) =>
+                it.id === purchaseLineId
+                  ? {
+                      ...it,
+                      unit_price: nextUnitPrice,
+                      line_total: nextLineTotal,
+                    }
+                  : it
+              ),
+            }
+          : prev
+      );
+
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? {
+                ...row,
+                total_qty: nextTotalQty,
+                subtotal: nextSubtotal,
+                total_selling_price: nextTotal,
+              }
+            : row
+        )
+      );
+    },
+    []
+  );
+
+  const handlePurchaseQtyChange = React.useCallback(
+    async (purchaseId: string, purchaseLineId: string, qty: number | null) => {
+      const result = await updatePurchaseLineQty(purchaseLineId, qty);
+      const nextQty = Number(result.qty ?? 0);
+      const nextReceivedQty = Number(result.receivedQty ?? 0);
+      const nextLineTotal = Number(result.lineTotal ?? 0);
+      const nextSubtotal = Number(result.subtotal ?? 0);
+      const nextTotal = Number(result.total ?? 0);
+      const nextTotalQty = Number(result.totalQty ?? 0);
+
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              total_qty: nextTotalQty,
+              subtotal: nextSubtotal,
+              total_selling_price: nextTotal,
+              items: prev.items.map((it) =>
+                it.id === purchaseLineId
+                  ? { ...it, qty: nextQty, received_qty: nextReceivedQty, line_total: nextLineTotal }
+                  : it
+              ),
+            }
+          : prev
+      );
+
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? { ...row, total_qty: nextTotalQty, subtotal: nextSubtotal, total_selling_price: nextTotal }
+            : row
+        )
+      );
+    },
+    []
+  );
+
+  const handlePurchaseLineDelete = React.useCallback(
+    async (purchaseId: string, purchaseLineId: string) => {
+      const result = await deletePurchaseLineByAdmin(purchaseLineId);
+      const nextSubtotal = Number(result.subtotal ?? 0);
+      const nextTotal = Number(result.total ?? 0);
+      const nextTotalQty = Number(result.totalQty ?? 0);
+
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              total_qty: nextTotalQty,
+              subtotal: nextSubtotal,
+              total_selling_price: nextTotal,
+              items: prev.items.filter((it) => it.id !== purchaseLineId),
+            }
+          : prev
+      );
+
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? { ...row, total_qty: nextTotalQty, subtotal: nextSubtotal, total_selling_price: nextTotal }
+            : row
+        )
+      );
+    },
+    []
+  );
+
+  const handlePurchaseAddLines = React.useCallback(
+    async (purchaseId: string, items: Array<{ productId: string; qty: number }>) => {
+      await addPurchaseLinesByAdmin(purchaseId, items);
+      await loadAndSelectPurchase(purchaseId);
+      const rows = await fetchPurchases();
+      setAllPurchases(rows);
+    },
+    [loadAndSelectPurchase]
+  );
+
+  const handlePurchaseAmountPaidChange = React.useCallback(
+    async (purchaseId: string, amountPaid: number | null) => {
+      await updatePurchaseAmountPaid(purchaseId, amountPaid);
+      const normalizedAmountPaid =
+        amountPaid === null || Number.isNaN(Number(amountPaid))
+          ? null
+          : Math.max(0, Number(amountPaid));
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? {
+                ...row,
+                amount_paid: normalizedAmountPaid,
+              }
+            : row
+        )
+      );
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              amount_paid: normalizedAmountPaid,
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handlePurchasePaymentProofChange = React.useCallback(
+    async (purchaseId: string, file: File | null, currentPath: string | null) => {
+      await updatePurchasePaymentProof(purchaseId, file, currentPath);
+      if (selectedPurchaseDetail?.id === purchaseId) {
+        await loadAndSelectPurchase(purchaseId);
+      }
+    },
+    [loadAndSelectPurchase, selectedPurchaseDetail?.id]
+  );
+
+  const handlePurchaseAdminFieldsChange = React.useCallback(
+    async (purchaseId: string, patch: PurchaseAdminPatch) => {
+      await updatePurchaseAdminFields(purchaseId, patch);
+      setAllPurchases((prev) =>
+        prev.map((row) =>
+          row.id === purchaseId
+            ? {
+                ...row,
+                seller_name: patch.seller_name ?? row.seller_name,
+                seller_email: patch.seller_email ?? row.seller_email,
+                seller_phone: patch.seller_phone ?? row.seller_phone,
+                delivery_date: patch.delivery_date ?? row.delivery_date,
+                delivery_fee:
+                  patch.delivery_fee === undefined ? row.delivery_fee : Number(patch.delivery_fee),
+                total_selling_price:
+                  patch.total_selling_price === undefined
+                    ? row.total_selling_price
+                    : Number(patch.total_selling_price),
+              }
+            : row
+        )
+      );
+      setSelectedPurchaseDetail((prev) =>
+        prev && prev.id === purchaseId
+          ? {
+              ...prev,
+              created_at: patch.created_at ?? prev.created_at,
+              seller_name: patch.seller_name ?? prev.seller_name,
+              seller_email: patch.seller_email ?? prev.seller_email,
+              seller_phone: patch.seller_phone ?? prev.seller_phone,
+              seller_address: patch.seller_address ?? prev.seller_address,
+              notes: patch.notes ?? prev.notes,
+              delivery_date: patch.delivery_date ?? prev.delivery_date,
+              delivery_slot: patch.delivery_slot ?? prev.delivery_slot,
+              express_delivery: patch.express_delivery ?? prev.express_delivery,
+              add_thermal_bag: patch.add_thermal_bag ?? prev.add_thermal_bag,
+              delivery_fee:
+                patch.delivery_fee === undefined ? prev.delivery_fee : Number(patch.delivery_fee),
+              total_selling_price:
+                patch.total_selling_price === undefined
+                  ? prev.total_selling_price
+                  : Number(patch.total_selling_price),
+            }
+          : prev
+      );
+    },
+    []
+  );
+
+  const handlePurchaseDelete = React.useCallback(async (purchaseId: string) => {
+    await deletePurchaseByAdmin(purchaseId, {
+      paymentProofPath:
+        selectedPurchaseDetail?.id === purchaseId ? selectedPurchaseDetail.payment_proof_path : null,
+    });
+    setAllPurchases((prev) => prev.filter((row) => row.id !== purchaseId));
+    setSelectedPurchaseId((prev) => (prev === purchaseId ? null : prev));
+    setSelectedPurchaseDetail((prev) => (prev?.id === purchaseId ? null : prev));
+    setAllPurchasesOpen(true);
+  }, [selectedPurchaseDetail]);
+
   const openMyOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadMyOrders = async () => {
       if (!authUserId) {
@@ -2032,10 +2613,10 @@ React.useEffect(() => {
     setSelectedAllOrderId(null);
     void loadMyOrders();
     setOrdersOpen(true);
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/myorders");
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/myorders");
     }
-  }, [authEmail, authPhone, authUserId, closePrimaryDrawers]);
+  }, [authEmail, authPhone, authUserId, closePrimaryDrawers, pushAppRoute]);
 
   const openAllOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadAllOrders = async () => {
@@ -2052,10 +2633,133 @@ React.useEffect(() => {
     setSelectedAllOrderId(null);
     void loadAllOrders();
     setAllOrdersOpen(true);
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/allorders");
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/allorders");
     }
-  }, [closePrimaryDrawers]);
+  }, [closePrimaryDrawers, pushAppRoute]);
+
+  const openAllCustomersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    const loadAllCustomers = async () => {
+      try {
+        const rows = await fetchAdminCustomers();
+        setAllCustomers(rows);
+      } catch (e) {
+        console.error("Failed to load customers", e);
+      }
+    };
+    closePrimaryDrawers();
+    setCartOpen(false);
+    void loadAllCustomers();
+    setAllCustomersOpen(true);
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/customers");
+    }
+  }, [closePrimaryDrawers, pushAppRoute]);
+
+  const createOrderAndOpen = React.useCallback(async () => {
+    try {
+      const orderId = await createOrderByAdmin();
+      const rows = await fetchOrders({ all: true });
+      setAllOrders(rows);
+      setSelectedAllOrderId(orderId);
+      setLoadingOrderDetail(true);
+      setOrderDrawerSource("all");
+      setAllOrdersOpen(false);
+      const params = new URLSearchParams({ id: orderId, source: "all" });
+      pushAppRoute(`/order?${params.toString()}`);
+      await loadAndSelectOrder(orderId);
+    } catch (e) {
+      console.error("Failed to create order", e);
+      alert("Failed to create order.");
+    }
+  }, [loadAndSelectOrder, pushAppRoute]);
+
+  const openAllPurchasesDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    const loadAllPurchases = async () => {
+      try {
+        const rows = await fetchPurchases();
+        setAllPurchases(rows);
+      } catch (e) {
+        console.error("Failed to load all purchases", e);
+      }
+    };
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setLoadingPurchaseDetail(false);
+    setSelectedPurchaseId(null);
+    setSelectedPurchaseDetail(null);
+    void loadAllPurchases();
+    setAllPurchasesOpen(true);
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/allpurchases");
+    }
+  }, [closePrimaryDrawers, pushAppRoute]);
+
+  const handleAdjustCustomerCredits = React.useCallback(async (customerId: string, delta: number) => {
+    const nextBalance = await adjustCustomerSteakCredits(customerId, delta);
+    setAllCustomers((prev) =>
+      prev.map((row) =>
+        row.id === customerId ? { ...row, current_credits: nextBalance } : row
+      )
+    );
+    setSelectedCustomerDetail((prev) =>
+      prev && prev.customer.id === customerId
+        ? {
+            ...prev,
+            customer: {
+              ...prev.customer,
+              available_steak_credits: nextBalance,
+            },
+          }
+        : prev
+    );
+  }, []);
+
+  const loadAndSelectCustomer = React.useCallback(async (customerId: string) => {
+    setLoadingCustomerDetail(true);
+    setSelectedCustomerId(customerId);
+    setSelectedCustomerDetail(null);
+    try {
+      const detail = await fetchAdminCustomerDetail(customerId);
+      setSelectedCustomerDetail(detail);
+      return detail;
+    } catch (error) {
+      console.error("Failed to load customer detail", error);
+      setSelectedCustomerDetail(null);
+      return null;
+    } finally {
+      setLoadingCustomerDetail(false);
+    }
+  }, []);
+
+  const openCustomerDetailDrawer = React.useCallback(
+    (customerId: string, opts?: { skipNavigate?: boolean }) => {
+      closePrimaryDrawers();
+      setCartOpen(false);
+      setSelectedCustomerId(customerId);
+      if (!opts?.skipNavigate) {
+        pushAppRoute(`/customer?id=${encodeURIComponent(customerId)}`);
+      }
+      void loadAndSelectCustomer(customerId);
+    },
+    [closePrimaryDrawers, loadAndSelectCustomer, pushAppRoute]
+  );
+
+  const createPurchaseAndOpen = React.useCallback(async () => {
+    try {
+      const purchaseId = await createPurchaseByAdmin();
+      const rows = await fetchPurchases();
+      setAllPurchases(rows);
+      setSelectedPurchaseId(purchaseId);
+      setLoadingPurchaseDetail(true);
+      setAllPurchasesOpen(false);
+      pushAppRoute(`/purchase?id=${encodeURIComponent(purchaseId)}&source=all`);
+      await loadAndSelectPurchase(purchaseId);
+    } catch (e) {
+      console.error("Failed to create purchase", e);
+      alert("Failed to create purchase.");
+    }
+  }, [loadAndSelectPurchase, pushAppRoute]);
 
   const loadInventoryRows = React.useCallback(async () => {
     setLoadingInventory(true);
@@ -2064,16 +2768,35 @@ React.useEffect(() => {
       const safeProducts = Array.isArray(allProducts) ? allProducts : [];
       const ids = safeProducts.map((item) => String(item.id));
       const allImages = ids.length ? await fetchProductImages(ids) : [];
-      const { data, error } = await supabase
+      const primaryInventoryRead = await supabase
         .from("inventory")
-        .select("product_id,qty_on_hand,qty_allocated,qty_available");
-      if (error) throw error;
+        .select("product_id,qty_on_hand,qty_allocated,qty_available,reorder_point,target_stock");
+
+      let inventoryData: Array<Record<string, unknown>> | null =
+        (primaryInventoryRead.data as Array<Record<string, unknown>> | null) ?? null;
+      let inventoryError = primaryInventoryRead.error;
+
+      if (inventoryError) {
+        const msg = String(inventoryError.message ?? inventoryError).toLowerCase();
+        const missingReorderSchema =
+          msg.includes("reorder_point") || msg.includes("target_stock") || msg.includes("column");
+        if (missingReorderSchema) {
+          const fallbackInventoryRead = await supabase
+            .from("inventory")
+            .select("product_id,qty_on_hand,qty_allocated,qty_available,low_stock_threshold");
+          inventoryData =
+            (fallbackInventoryRead.data as Array<Record<string, unknown>> | null) ?? null;
+          inventoryError = fallbackInventoryRead.error;
+        }
+      }
+
+      if (inventoryError) throw inventoryError;
 
       const byProductId = new Map<
         string,
-        { qty_on_hand: number; qty_allocated: number; qty_available: number }
+        { qty_on_hand: number; qty_allocated: number; qty_available: number; reorder_point: number; target_stock: number }
       >();
-      for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      for (const row of (inventoryData ?? []) as Array<Record<string, unknown>>) {
         const id = String(row.product_id ?? "");
         if (!id) continue;
         byProductId.set(id, normalizeInventorySnapshot(row));
@@ -2093,6 +2816,8 @@ React.useEffect(() => {
             qty_on_hand: 0,
             qty_allocated: 0,
             qty_available: 0,
+            reorder_point: 0,
+            target_stock: 0,
           };
           const images = (imagesById[id] ?? []).slice().sort((a, b) => a.sort_order - b.sort_order);
           const orderOne = images.find((img) => img.sort_order === 1)?.url ?? null;
@@ -2110,6 +2835,8 @@ React.useEffect(() => {
             qty_on_hand: inv.qty_on_hand,
             qty_allocated: inv.qty_allocated,
             qty_available: inv.qty_available,
+            reorder_point: inv.reorder_point,
+            target_stock: inv.target_stock,
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -2303,6 +3030,70 @@ React.useEffect(() => {
     []
   );
 
+  const handleInventoryReorderPointChange = React.useCallback(
+    async (productId: string, next: number) => {
+      const safeReorderPoint = Math.max(0, Math.floor(Number(next) || 0));
+      const current = inventoryRows.find((row) => row.product_id === productId);
+      const safeTargetStock = Math.max(safeReorderPoint, Number(current?.target_stock ?? 0));
+      const persist = await supabase
+        .from("inventory")
+        .upsert(
+          {
+            product_id: productId,
+            reorder_point: safeReorderPoint,
+            target_stock: safeTargetStock,
+          },
+          { onConflict: "product_id" }
+        );
+
+      if (persist.error) {
+        const message = persist.error.message ?? "Failed to update reorder point.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      setInventoryRows((prev) =>
+        prev.map((row) =>
+          row.product_id === productId
+            ? { ...row, reorder_point: safeReorderPoint, target_stock: Math.max(safeReorderPoint, row.target_stock) }
+            : row
+        )
+      );
+    },
+    [inventoryRows]
+  );
+
+  const handleInventoryTargetStockChange = React.useCallback(
+    async (productId: string, next: number) => {
+      const current = inventoryRows.find((row) => row.product_id === productId);
+      const safeReorderPoint = Math.max(0, Number(current?.reorder_point ?? 0));
+      const safeTargetStock = Math.max(safeReorderPoint, Math.floor(Number(next) || 0));
+      const persist = await supabase
+        .from("inventory")
+        .upsert(
+          {
+            product_id: productId,
+            reorder_point: safeReorderPoint,
+            target_stock: safeTargetStock,
+          },
+          { onConflict: "product_id" }
+        );
+
+      if (persist.error) {
+        const message = persist.error.message ?? "Failed to update target stock.";
+        alert(message);
+        throw new Error(message);
+      }
+
+      setInventoryRows((prev) =>
+        prev.map((row) =>
+          row.product_id === productId ? { ...row, target_stock: safeTargetStock } : row
+        )
+      );
+    },
+    [inventoryRows]
+  );
+
   const openInventoryDrawer = React.useCallback(
     (opts?: { skipNavigate?: boolean }) => {
       if (!isAdmin) return;
@@ -2310,51 +3101,66 @@ React.useEffect(() => {
       setCartOpen(false);
       void loadInventoryRows();
       setInventoryOpen(true);
-      if (!opts?.skipNavigate && typeof window !== "undefined") {
-        window.history.pushState({}, "", "/inventory");
+      if (!opts?.skipNavigate) {
+        pushAppRoute("/inventory");
       }
     },
-    [closePrimaryDrawers, isAdmin, loadInventoryRows]
+    [closePrimaryDrawers, isAdmin, loadInventoryRows, pushAppRoute]
   );
 
   const openAnalyticsDrawer = React.useCallback(
-    async (opts?: { skipNavigate?: boolean }) => {
+    (opts?: { skipNavigate?: boolean }) => {
       if (!isAdmin) return;
       closePrimaryDrawers();
       setCartOpen(false);
-      try {
-        const rows = await fetchOrders({ all: true });
-        setAllOrders(rows);
-      } catch (e) {
-        console.error("Failed to load analytics orders", e);
-      }
       setAnalyticsOpen(true);
-      if (!opts?.skipNavigate && typeof window !== "undefined") {
-        window.history.pushState({}, "", "/analytics");
+      if (!opts?.skipNavigate) {
+        pushAppRoute("/analytics");
       }
+      void fetchOrders({ all: true })
+        .then((rows) => {
+          setAllOrders(rows);
+        })
+        .catch((e) => {
+          console.error("Failed to load analytics orders", e);
+        });
     },
-    [closePrimaryDrawers, isAdmin]
+    [closePrimaryDrawers, isAdmin, pushAppRoute]
   );
 
   const openCart = React.useCallback((opts?: { skipNavigate?: boolean }) => {
-    // Cart should never coexist with orders/all-orders drawers.
-    closePrimaryDrawers();
+    // Keep product drawer open under cart; close other primary drawers.
+    const keepProductDrawer = panel === "product" && !!selectedId;
+    if (!keepProductDrawer) {
+      closePrimaryDrawers();
+    }
     setInventoryOpen(false);
     setCartOpen(true);
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/cart");
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/cart");
     }
-  }, [closePrimaryDrawers]);
+  }, [closePrimaryDrawers, panel, pushAppRoute, selectedId]);
 
   React.useEffect(() => {
     if (!cartOpen) return;
     // Defensive guard: while cart is visible, force all-orders context off.
     if (allOrdersOpen) setAllOrdersOpen(false);
+    if (allCustomersOpen) setAllCustomersOpen(false);
+    setAllPurchasesOpen(false);
+    if (allPurchasesOpen) setAllPurchasesOpen(false);
     if (orderDrawerSource === "all") {
       setOrderDrawerSource(null);
       setSelectedOrderDetail(null);
     }
-  }, [allOrdersOpen, cartOpen, orderDrawerSource]);
+    if (selectedPurchaseDetail) {
+      setSelectedPurchaseDetail(null);
+      setSelectedPurchaseId(null);
+    }
+    if (selectedCustomerDetail) {
+      setSelectedCustomerDetail(null);
+      setSelectedCustomerId(null);
+    }
+  }, [allCustomersOpen, allOrdersOpen, allPurchasesOpen, cartOpen, orderDrawerSource, selectedCustomerDetail, selectedPurchaseDetail]);
 
   const resolveRouteWithoutCart = React.useCallback(() => {
     if (panel === "checkout") return "/checkout";
@@ -2373,8 +3179,17 @@ React.useEffect(() => {
       }
       return `/order?${params.toString()}`;
     }
+    if (selectedCustomerDetail?.customer.id) {
+      return `/customer?id=${encodeURIComponent(selectedCustomerDetail.customer.id)}`;
+    }
+    if (selectedPurchaseDetail?.id) {
+      const params = new URLSearchParams({ id: String(selectedPurchaseDetail.id), source: "all" });
+      return `/purchase?${params.toString()}`;
+    }
     if (inventoryOpen) return "/inventory";
     if (analyticsOpen) return "/analytics";
+    if (allCustomersOpen) return "/customers";
+    if (allPurchasesOpen) return "/allpurchases";
     if (allOrdersOpen) return "/allorders";
     if (ordersOpen) return "/myorders";
     if (detailsOpen) return "/profile";
@@ -2383,6 +3198,8 @@ React.useEffect(() => {
   }, [
     adminAllProductsMode,
     analyticsOpen,
+    allCustomersOpen,
+    allPurchasesOpen,
     allOrdersOpen,
     detailsOpen,
     inventoryOpen,
@@ -2390,7 +3207,9 @@ React.useEffect(() => {
     orderDrawerSource,
     ordersOpen,
     panel,
+    selectedCustomerDetail?.customer.id,
     selectedId,
+    selectedPurchaseDetail?.id,
     selectedOrderDetail?.id,
   ]);
 
@@ -2409,10 +3228,10 @@ React.useEffect(() => {
     setCartOpen(false);
     setAdminAllProductsMode(false);
     scrollToProducts();
-    if (!opts?.skipNavigate && typeof window !== "undefined") {
-      window.history.pushState({}, "", "/shop");
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/shop");
     }
-  }, [closePrimaryDrawers, scrollToProducts]);
+  }, [closePrimaryDrawers, pushAppRoute, scrollToProducts]);
 
   const applyRouteFromLocation = React.useCallback(
     (rawPath: string, rawSearch: string) => {
@@ -2506,9 +3325,49 @@ React.useEffect(() => {
           setOrderDrawerSource(nextSource);
           setOrdersOpen(false);
           setAllOrdersOpen(false);
+          setAllCustomersOpen(false);
+    setAllPurchasesOpen(false);
           setPanel(null);
           setCartOpen(false);
           void loadAndSelectOrder(id);
+          return;
+        }
+        if (path === "/customer") {
+          const id = params.get("id") || params.get("customer");
+          if (!id) {
+            openShop({ skipNavigate: true });
+            return;
+          }
+          if (!requireAdmin({ path, search })) return;
+          setPanel(null);
+          setCartOpen(false);
+          setOrdersOpen(false);
+          setAllOrdersOpen(false);
+          setAllCustomersOpen(false);
+          setAllPurchasesOpen(false);
+          setOrderDrawerSource(null);
+          setSelectedOrderDetail(null);
+          setSelectedPurchaseId(null);
+          setSelectedPurchaseDetail(null);
+          setLoadingPurchaseDetail(false);
+          void loadAndSelectCustomer(id);
+          return;
+        }
+        if (path === "/purchase") {
+          const id = params.get("id") || params.get("purchase");
+          if (!id) {
+            openShop({ skipNavigate: true });
+            return;
+          }
+          if (!requireAdmin({ path, search })) return;
+          setPanel(null);
+          setCartOpen(false);
+          setOrdersOpen(false);
+          setAllOrdersOpen(false);
+          setAllCustomersOpen(false);
+    setAllPurchasesOpen(false);
+          setAllPurchasesOpen(false);
+          void loadAndSelectPurchase(id);
           return;
         }
         if (path === "/myorders") {
@@ -2524,6 +3383,16 @@ React.useEffect(() => {
         if (path === "/allorders") {
           if (!requireAdmin({ path, search })) return;
           openAllOrdersDrawer({ skipNavigate: true });
+          return;
+        }
+        if (path === "/customers") {
+          if (!requireAdmin({ path, search })) return;
+          openAllCustomersDrawer({ skipNavigate: true });
+          return;
+        }
+        if (path === "/allpurchases") {
+          if (!requireAdmin({ path, search })) return;
+          openAllPurchasesDrawer({ skipNavigate: true });
           return;
         }
         if (path === "/allproducts") {
@@ -2553,6 +3422,10 @@ React.useEffect(() => {
       closePrimaryDrawers,
       isAdmin,
       loadAndSelectOrder,
+      loadAndSelectCustomer,
+      loadAndSelectPurchase,
+      openAllCustomersDrawer,
+      openAllPurchasesDrawer,
       openAllOrdersDrawer,
       openAllProductsView,
       openCart,
@@ -2581,6 +3454,25 @@ React.useEffect(() => {
     pendingRouteRef.current = null;
     applyRouteFromLocation(next.path, next.search);
   }, [applyRouteFromLocation, authReady, authUserId, isAdmin]);
+
+  const goBackDrawer = React.useCallback(
+    (fallback = "/shop") => {
+      if (typeof window === "undefined") return;
+      const current = getCurrentRoute();
+      let next = fallback;
+      while (drawerRouteHistoryRef.current.length > 0) {
+        const candidate = drawerRouteHistoryRef.current.pop();
+        if (candidate && candidate !== current) {
+          next = candidate;
+          break;
+        }
+      }
+      pushAppRoute(next, { rememberCurrent: false });
+      const url = new URL(next, window.location.origin);
+      applyRouteFromLocation(url.pathname, url.search);
+    },
+    [applyRouteFromLocation, getCurrentRoute, pushAppRoute]
+  );
 
   React.useEffect(() => {
     if (!orderPlacedModal || orderPlacedModal.summaryReady || orderPlacedModal.summaryTimedOut) return;
@@ -2630,6 +3522,94 @@ React.useEffect(() => {
       .join(", ");
   }, []);
 
+  const syncProfileAndCustomer = React.useCallback(
+    async (params: {
+      profileId: string;
+      email?: string | null;
+      customerId?: string | null;
+      customerDraft: CustomerDraft;
+    }) => {
+      const { profileId, email = null, customerId = null, customerDraft } = params;
+      const nameParts = customerDraft.full_name.trim().split(/\s+/).filter(Boolean);
+      const firstName = nameParts[0] ?? "";
+      const lastName = nameParts.slice(1).join(" ");
+      let resolvedCustomerId = customerId ? String(customerId) : null;
+
+      if (resolvedCustomerId) {
+        const existing = await fetchCustomerById(resolvedCustomerId);
+        if (!existing) resolvedCustomerId = null;
+      }
+
+      const ensuredCustomer = resolvedCustomerId
+        ? await updateCustomerRecord(resolvedCustomerId, {
+            firstName,
+            lastName,
+            fullName: customerDraft.full_name,
+            phone: customerDraft.phone,
+            email,
+            address: composeAddress(customerDraft),
+            notes: customerDraft.notes,
+          })
+        : await ensureCustomerRecord({
+            firstName,
+            lastName,
+            fullName: customerDraft.full_name,
+            phone: customerDraft.phone,
+            email,
+            address: composeAddress(customerDraft),
+            notes: customerDraft.notes,
+          });
+
+      const finalCustomerId = ensuredCustomer?.id ? String(ensuredCustomer.id) : resolvedCustomerId;
+
+      await supabase.from("profiles").upsert(
+        {
+          id: profileId,
+          customer_id: finalCustomerId,
+          first_name: firstName || null,
+          last_name: lastName || null,
+          phone: customerDraft.phone.trim() || null,
+          attention_to: customerDraft.attention_to.trim() || null,
+          address_line1: customerDraft.line1.trim() || null,
+          address_line2: customerDraft.line2.trim() || null,
+          barangay: customerDraft.barangay.trim() || null,
+          city: customerDraft.city.trim() || null,
+          province: customerDraft.province.trim() || null,
+          postal_code: customerDraft.postal_code.trim() || null,
+          country: customerDraft.country.trim() || "Philippines",
+          delivery_note: customerDraft.notes.trim() || null,
+        },
+        { onConflict: "id" }
+      );
+
+      if (finalCustomerId) {
+        await linkProfileToCustomer(profileId, finalCustomerId);
+      }
+
+      return finalCustomerId;
+    },
+    [composeAddress]
+  );
+
+  const linkProfileToOrderCustomer = React.useCallback(
+    async (profileId: string, orderId: string, customerDraft: CustomerDraft, email?: string | null) => {
+      const { data: orderRow, error } = await supabase
+        .from("orders")
+        .select("customer_id")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (error) throw error;
+      const customerId = orderRow?.customer_id ? String(orderRow.customer_id) : null;
+      return syncProfileAndCustomer({
+        profileId,
+        email: email ?? null,
+        customerId,
+        customerDraft,
+      });
+    },
+    [syncProfileAndCustomer]
+  );
+
   const openOrderSummary = React.useCallback(
     (
       orderId: string,
@@ -2645,6 +3625,7 @@ React.useEffect(() => {
       setOrderDrawerSource("public");
       setOrdersOpen(false);
       setAllOrdersOpen(false);
+    setAllPurchasesOpen(false);
       setPublicOrderNotice(opts?.noticeText ?? "");
       if (opts?.detail) {
         setLoadingOrderDetail(false);
@@ -2662,12 +3643,109 @@ React.useEffect(() => {
     [closePrimaryDrawers, loadAndSelectOrder]
   );
 
+  const ensureCheckoutAccountFromDetails = React.useCallback(async () => {
+    const email = customer.email.trim().toLowerCase();
+    const password = createAccountPassword.trim();
+    const confirmPassword = createAccountPasswordConfirm.trim();
+
+    if (!email) {
+      throw new Error("Email is required to create an account.");
+    }
+    if (password.length < 6) {
+      throw new Error("Password must be at least 6 characters.");
+    }
+    if (password !== confirmPassword) {
+      throw new Error("Passwords do not match.");
+    }
+
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}${window.location.pathname}`
+        : process.env.NEXT_PUBLIC_SITE_URL;
+
+    const signUp = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+        data: {
+          full_name: customer.full_name.trim() || null,
+          phone: customer.phone.trim() || null,
+        },
+      },
+    });
+
+    if (signUp.error) {
+      const message = signUp.error.message || "Account creation failed.";
+      const code = (signUp.error as { code?: string }).code || "";
+      if (
+        code === "user_already_exists" ||
+        message.toLowerCase().includes("already registered")
+      ) {
+        throw new Error(
+          "This email already has an account. Log in first, or use a different email to earn Steak Credits on this order."
+        );
+      }
+      throw signUp.error;
+    }
+
+    let authUser = signUp.data.user ?? null;
+
+    if (!signUp.data.session) {
+      const signIn = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signIn.error || !signIn.data.user) {
+        throw new Error(
+          "We couldn't sign you in automatically after creating your account. Please log in first, then place the order to earn Steak Credits."
+        );
+      }
+      authUser = signIn.data.user;
+    }
+
+    if (!authUser?.id) {
+      throw new Error("Account creation did not return a valid user.");
+    }
+
+    const nameParts = customer.full_name.trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] ?? "";
+    const lastName = nameParts.slice(1).join(" ");
+
+    const { error: profileError } = await supabase.from("profiles").upsert(
+      {
+        id: authUser.id,
+        first_name: firstName || null,
+        last_name: lastName || null,
+        phone: customer.phone.trim() || null,
+        attention_to: customer.attention_to.trim() || null,
+        address_line1: customer.line1.trim() || null,
+        address_line2: customer.line2.trim() || null,
+        barangay: customer.barangay.trim() || null,
+        city: customer.city.trim() || null,
+        province: customer.province.trim() || null,
+        postal_code: customer.postal_code.trim() || null,
+        country: customer.country.trim() || "Philippines",
+        delivery_note: customer.notes.trim() || null,
+      },
+      { onConflict: "id" }
+    );
+    if (profileError) throw profileError;
+
+    return authUser;
+  }, [
+    createAccountPassword,
+    createAccountPasswordConfirm,
+    customer,
+  ]);
+
   const submitCheckout = React.useCallback(async (payload: CheckoutSubmitPayload) => {
     let activeSessionId = sessionIdRef.current;
     if (!activeSessionId || activeSessionId === "server") return;
     if (submittingCheckout) return;
 
     setSubmittingCheckout(true);
+    setCreateAccountError("");
 
     try {
 
@@ -2677,8 +3755,20 @@ React.useEffect(() => {
     }
 
     const {
-      data: { user },
+      data: { user: authUser },
     } = await supabase.auth.getUser();
+    let user = authUser;
+
+    if (!user?.id && createAccountFromDetails) {
+      try {
+        user = await ensureCheckoutAccountFromDetails();
+      } catch (e) {
+        const message = formatSupabaseError(e, "Failed to create account for checkout.");
+        setCreateAccountError(message);
+        alert(message);
+        return;
+      }
+    }
 
     const ext = paymentFile.name.includes(".")
       ? paymentFile.name.split(".").pop()?.toLowerCase() ?? "jpg"
@@ -2741,7 +3831,7 @@ React.useEffect(() => {
         p_payment_proof_url: path,
       });
       data = v2.data;
-      error = (v2.error as any) ?? null;
+      error = v2.error ? { message: String(v2.error.message ?? v2.error) } : null;
 
       // Backward compatibility until SQL v2 is applied.
       if (error && String(error.message).toLowerCase().includes("checkout_cart_v2")) {
@@ -2754,7 +3844,7 @@ React.useEffect(() => {
           p_payment_proof_url: path,
         });
         data = v1.data;
-        error = (v1.error as any) ?? null;
+        error = v1.error ? { message: String(v1.error.message ?? v1.error) } : null;
       }
       return { data, error };
     };
@@ -2876,17 +3966,37 @@ React.useEffect(() => {
       if (statusError) {
         console.warn("[checkout] initial status update failed:", statusError.message);
       }
+      if (user?.id) {
+        const steakCreditsEarned = calculateSteakCredits(payload.subtotal);
+        const { error: creditsError } = await supabase
+          .from("orders")
+          .update({
+            steak_credits_earned: steakCreditsEarned,
+            steak_credits_granted: false,
+          })
+          .eq("id", orderId);
+        if (creditsError) {
+          console.warn("[checkout] steak credits preview update failed:", creditsError.message);
+        }
+      }
+      try {
+        await hydrateOrderLineFinancialSnapshots(orderId);
+      } catch (financialErr) {
+        console.warn("[checkout] order line financial snapshot update failed:", financialErr);
+      }
     }
 
     let resolvedOrderNumber = "";
+    let resolvedCustomerId: string | null = null;
     if (orderId) {
       try {
         const { data: orderMeta } = await supabase
           .from("orders")
-          .select("order_number")
+          .select("order_number,customer_id")
           .eq("id", orderId)
           .maybeSingle();
         resolvedOrderNumber = String(orderMeta?.order_number ?? "").trim();
+        resolvedCustomerId = orderMeta?.customer_id ? String(orderMeta.customer_id) : null;
       } catch {
         // best effort only
       }
@@ -2927,36 +4037,33 @@ React.useEffect(() => {
       )
     );
     await refreshCart();
-    if (user?.id && saveAddressToProfile) {
-      const profileDraft = customer as Record<string, unknown>;
-      const nameParts = customer.full_name.trim().split(/\s+/);
-      const firstName = nameParts[0] ?? "";
-      const lastName = nameParts.slice(1).join(" ");
-      await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          first_name: firstName || null,
-          last_name: lastName || null,
-          phone: String(profileDraft["phone"] ?? "") || null,
-          attention_to: String(profileDraft["attention_to"] ?? "") || null,
-          address_line1: String(profileDraft["line1"] ?? "") || null,
-          address_line2: String(profileDraft["line2"] ?? "") || null,
-          barangay: String(profileDraft["barangay"] ?? "") || null,
-          city: String(profileDraft["city"] ?? "") || null,
-          province: String(profileDraft["province"] ?? "") || null,
-          postal_code: String(profileDraft["postal_code"] ?? "") || null,
-          country: String(profileDraft["country"] ?? "") || "Philippines",
-          delivery_note: String(profileDraft["notes"] ?? "") || null,
-        },
-        { onConflict: "id" }
-      );
-    }
-    if (!user?.id && createAccountFromDetails) {
-      setAuthOpen(true);
+    if (user?.id) {
+      try {
+        if (orderId) {
+          await linkProfileToOrderCustomer(
+            user.id,
+            orderId,
+            customer,
+            customerEmail.trim() || user.email || null
+          );
+        } else if (saveAddressToProfile || createAccountFromDetails) {
+          await syncProfileAndCustomer({
+            profileId: user.id,
+            email: customerEmail.trim() || user.email || null,
+            customerId: resolvedCustomerId,
+            customerDraft: customer,
+          });
+        }
+      } catch (profileSyncError) {
+        console.warn("[checkout] profile/customer sync failed:", profileSyncError);
+      }
     }
     setPaymentFile(null);
     setCustomer(blankCustomer());
     setCreateAccountFromDetails(false);
+    setCreateAccountPassword("");
+    setCreateAccountPasswordConfirm("");
+    setCreateAccountError("");
     setSaveAddressToProfile(false);
     setPanel(null);
     if (orderId) {
@@ -2975,7 +4082,7 @@ React.useEffect(() => {
     } finally {
       setSubmittingCheckout(false);
     }
-  }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts, submittingCheckout]);
+  }, [blankCustomer, cartItems, composeAddress, createAccountFromDetails, customer, ensureCheckoutAccountFromDetails, formatSupabaseError, linkProfileToOrderCustomer, paymentFile, refreshCart, saveAddressToProfile, scrollToProducts, submittingCheckout, syncProfileAndCustomer]);
 
   const selectedProductImages: ProductImage[] = React.useMemo(() => {
     if (!selectedId) return [];
@@ -3033,6 +4140,9 @@ React.useEffect(() => {
       data-tp-mode={themeMode}
       style={{
         ...styles.page,
+        fontFamily:
+          FONT_FAMILY_BY_ID[String(themeColors.font_family || "inter")] ||
+          FONT_FAMILY_BY_ID.inter,
         ...(mainZoneStyle ?? null),
       }}
     >
@@ -3140,6 +4250,8 @@ React.useEffect(() => {
           editMode={editMode}
           onToggleEditMode={toggleEditMode}
           onOpenAllOrders={openAllOrdersDrawer}
+          onOpenAllCustomers={openAllCustomersDrawer}
+          onOpenAllPurchases={openAllPurchasesDrawer}
           onOpenAllProducts={openAllProductsView}
           onOpenInventory={openInventoryDrawer}
           onOpenAnalytics={openAnalyticsDrawer}
@@ -3166,7 +4278,11 @@ React.useEffect(() => {
         >
           {activeBanner && String(activeBanner.image_url ?? "").trim() ? (
             <div style={styles.bannerWrap}>
-              <div style={styles.bannerRail}>
+              <div
+                style={
+                  activeBanners.length > 1 ? styles.bannerRail : styles.bannerRailSingle
+                }
+              >
                 {activeBanners.length > 1 ? (
                   <button
                     type="button"
@@ -3464,11 +4580,16 @@ React.useEffect(() => {
         product={selectedProduct}
         images={selectedProductImages}
         qty={selectedId ? cart[selectedId] ?? 0 : 0}
+        cartQtyById={cart}
+        relatedProducts={sameCategoryProducts}
+        popularProducts={popularProducts}
         onBack={backToList}
         canEdit={isAdmin && editMode}
         onEdit={openEditProduct}
+        onOpenProduct={openProduct}
         onAdd={addToCart}
         onRemove={removeFromCart}
+        onSetQty={setQtyInCart}
         formatMoney={formatMoney}
       />
 
@@ -3506,7 +4627,25 @@ React.useEffect(() => {
         isAdmin={isAdmin}
         isLoggedIn={!!authUserId}
         createAccountFromDetails={createAccountFromDetails}
-        setCreateAccountFromDetails={setCreateAccountFromDetails}
+        setCreateAccountFromDetails={(next) => {
+          setCreateAccountFromDetails(next);
+          setCreateAccountError("");
+          if (!next) {
+            setCreateAccountPassword("");
+            setCreateAccountPasswordConfirm("");
+          }
+        }}
+        createAccountPassword={createAccountPassword}
+        setCreateAccountPassword={(next) => {
+          setCreateAccountPassword(next);
+          setCreateAccountError("");
+        }}
+        createAccountPasswordConfirm={createAccountPasswordConfirm}
+        setCreateAccountPasswordConfirm={(next) => {
+          setCreateAccountPasswordConfirm(next);
+          setCreateAccountError("");
+        }}
+        createAccountError={createAccountError}
         suggestSaveAddressToProfile={!!authUserId && !profileHasAddress}
         saveAddressToProfile={saveAddressToProfile}
         setSaveAddressToProfile={setSaveAddressToProfile}
@@ -3546,9 +4685,13 @@ React.useEffect(() => {
         isOpen={detailsOpen}
         topOffset={topOffset}
         userId={authUserId}
-        onClose={() => setDetailsOpen(false)}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => goBackDrawer("/shop")}
         onProfileSaved={(firstName) => {
-          if (firstName) setAuthLabel(firstName);
+          if (firstName) {
+            setAuthProfileName(firstName);
+            setAuthLabel(firstName);
+          }
         }}
       />
 
@@ -3556,22 +4699,22 @@ React.useEffect(() => {
         isOpen={ordersOpen}
         topOffset={topOffset}
         title="MY ORDERS"
+        backgroundStyle={mainZoneStyle}
         orders={myOrders}
         selectedOrderId={selectedMyOrderId}
+        onOpenCustomer={isAdmin ? openCustomerDetailDrawer : undefined}
         onSelectOrder={(id) => {
           setSelectedMyOrderId(id);
           setOrderDrawerSource("my");
           setOrdersOpen(false);
-          if (typeof window !== "undefined") {
-            const params = new URLSearchParams({ id, source: "my" });
-            window.history.pushState({}, "", `/order?${params.toString()}`);
-          }
+          const params = new URLSearchParams({ id, source: "my" });
+          pushAppRoute(`/order?${params.toString()}`);
           void loadAndSelectOrder(id);
         }}
         onClose={() => {
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
-          setOrdersOpen(false);
+          goBackDrawer("/shop");
         }}
       />
 
@@ -3580,22 +4723,86 @@ React.useEffect(() => {
         topOffset={topOffset}
         title="ALL ORDERS"
         showSearch
+        backgroundStyle={mainZoneStyle}
         orders={allOrders}
+        onOpenCustomer={openCustomerDetailDrawer}
+        onCreateOrder={() => {
+          void createOrderAndOpen();
+        }}
         selectedOrderId={selectedAllOrderId}
         onSelectOrder={(id) => {
           setSelectedAllOrderId(id);
           setOrderDrawerSource("all");
           setAllOrdersOpen(false);
-          if (typeof window !== "undefined") {
-            const params = new URLSearchParams({ id, source: "all" });
-            window.history.pushState({}, "", `/order?${params.toString()}`);
-          }
+          setAllPurchasesOpen(false);
+          const params = new URLSearchParams({ id, source: "all" });
+          pushAppRoute(`/order?${params.toString()}`);
           void loadAndSelectOrder(id);
         }}
         onClose={() => {
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
           setAllOrdersOpen(false);
+          setAllPurchasesOpen(false);
+          goBackDrawer("/shop");
+        }}
+      />
+
+      <CustomersDrawer
+        isOpen={allCustomersOpen}
+        topOffset={topOffset}
+        customers={allCustomers}
+        onOpenCustomer={openCustomerDetailDrawer}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => {
+          goBackDrawer("/shop");
+        }}
+      />
+
+      <CustomerDetailDrawer
+        isOpen={loadingCustomerDetail || !!selectedCustomerDetail}
+        topOffset={topOffset}
+        detail={selectedCustomerDetail}
+        loading={loadingCustomerDetail}
+        backgroundStyle={mainZoneStyle}
+        onAdjustCredits={handleAdjustCustomerCredits}
+        onBack={() => {
+          setSelectedCustomerDetail(null);
+          setSelectedCustomerId(null);
+          goBackDrawer("/customers");
+        }}
+        onOpenOrder={(id) => {
+          setOrderDrawerSource("all");
+          setSelectedCustomerDetail(null);
+          setSelectedCustomerId(null);
+          pushAppRoute(`/order?id=${encodeURIComponent(id)}&source=all`);
+          void loadAndSelectOrder(id);
+        }}
+      />
+
+      <PurchasesDrawer
+        isOpen={allPurchasesOpen}
+        topOffset={topOffset}
+        title="ALL PURCHASES"
+        showSearch
+        backgroundStyle={mainZoneStyle}
+        purchases={allPurchases}
+        selectedPurchaseId={selectedPurchaseId}
+        onCreatePurchase={() => {
+          void createPurchaseAndOpen();
+        }}
+        onSelectPurchase={(id) => {
+          setSelectedPurchaseId(id);
+          setAllPurchasesOpen(false);
+          const params = new URLSearchParams({ id, source: "all" });
+          pushAppRoute(`/purchase?${params.toString()}`);
+          void loadAndSelectPurchase(id);
+        }}
+        onClose={() => {
+          setSelectedPurchaseId(null);
+          setSelectedPurchaseDetail(null);
+          setAllPurchasesOpen(false);
+          goBackDrawer("/shop");
         }}
       />
 
@@ -3606,10 +4813,13 @@ React.useEffect(() => {
         loading={loadingInventory}
         onChangeUnlimited={handleInventoryUnlimitedChange}
         onChangeQtyOnHand={handleInventoryQtyOnHandChange}
+        onChangeReorderPoint={handleInventoryReorderPointChange}
+        onChangeTargetStock={handleInventoryTargetStockChange}
         onBulkChangeUnlimited={handleInventoryBulkUnlimitedChange}
         onBulkChangeQtyOnHand={handleInventoryBulkQtyOnHandChange}
+        backgroundStyle={mainZoneStyle}
         onClose={() => {
-          openShop();
+          goBackDrawer("/shop");
         }}
       />
 
@@ -3619,7 +4829,7 @@ React.useEffect(() => {
         orders={allOrders}
         backgroundStyle={mainZoneStyle}
         onClose={() => {
-          openShop();
+          goBackDrawer("/shop");
         }}
       />
 
@@ -3632,34 +4842,43 @@ React.useEffect(() => {
         canEdit={orderDrawerSource === "all"}
         onChangeStatuses={handleOrderStatusChange}
         onChangePackedQty={handleOrderPackedQtyChange}
+        onChangeUnitPrice={handleOrderUnitPriceChange}
         onAddLines={handleOrderAddLines}
         onChangeAmountPaid={handleOrderAmountPaidChange}
         onChangePaymentProof={handleOrderPaymentProofChange}
         onChangeAdminFields={handleOrderAdminFieldsChange}
         onDeleteOrder={handleOrderDelete}
         noticeText={orderDrawerSource === "public" ? publicOrderNotice : ""}
+        backgroundStyle={mainZoneStyle}
         onBack={() => {
           const source = orderDrawerSource;
           setPublicOrderNotice("");
           setOrderDrawerSource(null);
           setSelectedOrderDetail(null);
-          if (source === "public") {
-            openShop();
-            return;
-          }
-          if (source === "my") {
-            setOrdersOpen(true);
-            if (typeof window !== "undefined") {
-              window.history.pushState({}, "", "/myorders");
-            }
-            return;
-          }
-          if (source === "all") {
-            setAllOrdersOpen(true);
-            if (typeof window !== "undefined") {
-              window.history.pushState({}, "", "/allorders");
-            }
-          }
+          goBackDrawer(source === "public" ? "/shop" : source === "my" ? "/myorders" : "/allorders");
+        }}
+      />
+
+      <PurchaseDrawer
+        isOpen={loadingPurchaseDetail || !!selectedPurchaseDetail}
+        topOffset={topOffset}
+        detail={selectedPurchaseDetail}
+        products={products}
+        loading={loadingPurchaseDetail}
+        canEdit
+        backgroundStyle={mainZoneStyle}
+        onChangeStatuses={handlePurchaseStatusChange}
+        onChangeReceivedQty={handlePurchaseReceivedQtyChange}
+        onChangeUnitPrice={handlePurchaseUnitPriceChange}
+        onChangeQty={handlePurchaseQtyChange}
+        onDeleteLine={handlePurchaseLineDelete}
+        onAddLines={handlePurchaseAddLines}
+        onChangeAmountPaid={handlePurchaseAmountPaidChange}
+        onChangeAdminFields={handlePurchaseAdminFieldsChange}
+        onDeletePurchase={handlePurchaseDelete}
+        onBack={() => {
+          setSelectedPurchaseDetail(null);
+          goBackDrawer("/allpurchases");
         }}
       />
 
@@ -3718,6 +4937,7 @@ React.useEffect(() => {
         onUploadFile={(file) => uploadUiAsset(file, "zone")}
         themeMode={themeMode}
         themeColors={themeColors}
+        fontOptions={FONT_OPTIONS}
         onSaveThemeColors={saveThemeColors}
         banners={
           zoneEditorTarget === "main"
@@ -3768,6 +4988,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
+    fontFamily: "var(--tp-font-family, Arial, Helvetica, sans-serif)",
   },
   pageInner: {
     minHeight: "100vh",
@@ -3891,6 +5112,12 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "auto 1fr auto",
     alignItems: "center",
     gap: 12,
+  },
+  bannerRailSingle: {
+    width: "var(--tp-rail-width)",
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    alignItems: "center",
   },
   bannerFrame: {
     width: "100%",

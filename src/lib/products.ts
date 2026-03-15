@@ -10,6 +10,7 @@ export type DbProduct = {
   love_points?: string | null;
   type?: string | null;
   cut?: string | null;
+  thickness?: string | null;
   preparation?: string | null;
   packaging?: string | null;
   size_g?: number | null;
@@ -64,6 +65,7 @@ export async function fetchProducts(options?: {
       love_points: (r["love_points"] as string | null) ?? null,
       type: (r["type"] as string | null) ?? null,
       cut: (r["cut"] as string | null) ?? null,
+      thickness: (r["thickness"] as string | null) ?? null,
       preparation:
         (r["preparation"] as string | null) ??
         (r["preparationa"] as string | null) ??
@@ -150,6 +152,7 @@ export function matchesProductQuery(p: DbProduct, q: string): boolean {
     p.name,
     p.long_name,
     p.size,
+    p.thickness,
     p.temperature,
     p.country_of_origin,
     p.keywords,

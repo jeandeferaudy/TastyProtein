@@ -4,8 +4,10 @@
 import * as React from "react";
 import type { Product } from "@/types/product";
 import type { ProductImage } from "@/lib/products";
+import { getDeliveryPricingMatrixRows } from "@/lib/deliveryPricing";
 import { AppButton, GearIcon, QtyIcon, TOPBAR_FONT_SIZE } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
+import ProductCard from "@/components/ProductCard";
 const BACK_BTN_W = 68;
 const TITLE_GAP = 40;
 
@@ -15,13 +17,18 @@ type Props = {
   product: Product | null;
   images: ProductImage[];
   qty: number;
+  cartQtyById?: Record<string, number>;
+  relatedProducts?: Product[];
+  popularProducts?: Product[];
   backgroundStyle?: React.CSSProperties;
   canEdit?: boolean;
 
   onBack: () => void;
   onEdit?: (id: string) => void;
+  onOpenProduct?: (id: string) => void;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  onSetQty?: (id: string, qty: number) => void;
 
   formatMoney: (n: unknown) => string;
 };
@@ -42,23 +49,53 @@ function splitLovePoints(value: string | null | undefined) {
     .filter(Boolean);
 }
 
+function StripChevronIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden
+      style={direction === "left" ? undefined : { transform: "rotate(180deg)" }}
+    >
+      <path
+        d="M12.5 4.5L7 10l5.5 5.5"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function ProductDrawer({
   isOpen,
   topOffset,
   product,
   images,
   qty,
+  cartQtyById = {},
+  relatedProducts = [],
+  popularProducts = [],
   backgroundStyle,
   canEdit = false,
   onBack,
   onEdit,
+  onOpenProduct,
   onAdd,
   onRemove,
+  onSetQty,
   formatMoney,
 }: Props) {
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
+  const [deliveryPricingOpen, setDeliveryPricingOpen] = React.useState(false);
+  const relatedStripRef = React.useRef<HTMLDivElement | null>(null);
+  const [canScrollRelatedLeft, setCanScrollRelatedLeft] = React.useState(false);
+  const [canScrollRelatedRight, setCanScrollRelatedRight] = React.useState(false);
   const productId = product ? String((product as { id?: string | number }).id ?? "") : "";
   const orderedImages = React.useMemo(
     () => [...images].sort((a, b) => a.sort_order - b.sort_order),
@@ -69,6 +106,7 @@ export default function ProductDrawer({
     return sortOne?.url ?? orderedImages[0]?.url ?? "";
   }, [orderedImages]);
   const [activeImageUrl, setActiveImageUrl] = React.useState<string>("");
+  const deliveryPricingRows = React.useMemo(() => getDeliveryPricingMatrixRows(), []);
 
   React.useEffect(() => {
     setActiveImageUrl(defaultMainImage);
@@ -81,10 +119,58 @@ export default function ProductDrawer({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  React.useEffect(() => {
+    if (!deliveryPricingOpen) return;
+    const onEsc = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setDeliveryPricingOpen(false);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [deliveryPricingOpen]);
+
+  React.useEffect(() => {
+    const el = relatedStripRef.current;
+    if (!el) return;
+    const getStep = () => {
+      const first = el.firstElementChild as HTMLElement | null;
+      const firstWidth = first?.getBoundingClientRect().width ?? 220;
+      const style = window.getComputedStyle(el);
+      const gap = Number.parseFloat(style.columnGap || style.gap || "10") || 10;
+      return firstWidth + gap;
+    };
+    const update = () => {
+      const step = getStep();
+      const maxIndex = Math.max(0, Math.round((el.scrollWidth - el.clientWidth) / step));
+      const currentIndex = Math.round(el.scrollLeft / step);
+      setCanScrollRelatedLeft(currentIndex > 0);
+      setCanScrollRelatedRight(currentIndex < maxIndex);
+    };
+    update();
+    const t = window.setTimeout(update, 80);
+    el.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.clearTimeout(t);
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [relatedProducts.length, isMobileViewport]);
+
+  const scrollRelatedBy = React.useCallback((direction: -1 | 1) => {
+    const el = relatedStripRef.current;
+    if (!el) return;
+    const first = el.firstElementChild as HTMLElement | null;
+    const firstWidth = first?.getBoundingClientRect().width ?? 220;
+    const style = window.getComputedStyle(el);
+    const gap = Number.parseFloat(style.columnGap || style.gap || "10") || 10;
+    const step = firstWidth + gap;
+    const maxIndex = Math.max(0, Math.round((el.scrollWidth - el.clientWidth) / step));
+    const currentIndex = Math.round(el.scrollLeft / step);
+    const nextIndex = Math.max(0, Math.min(maxIndex, currentIndex + direction));
+    el.scrollTo({ left: nextIndex * step, behavior: "smooth" });
+  }, []);
+
   const detailRowStyle = styles.detailRowInline;
-  const purchaseRowStyle = isMobileViewport
-    ? styles.drawerPurchaseRow
-    : styles.drawerPurchaseRowDesktop;
   const priceStyle = isMobileViewport ? styles.drawerPrice : styles.drawerPriceDesktop;
   const formatStyle = isMobileViewport ? styles.drawerFormat : styles.drawerFormatDesktop;
   const qtyRowStyle = isMobileViewport ? styles.drawerQtyRow : styles.drawerQtyRowDesktop;
@@ -212,6 +298,13 @@ export default function ProductDrawer({
           </div>
         ) : null}
 
+        {product.thickness ? (
+          <div style={detailRowStyle}>
+            <div style={styles.detailLabel}>Thickness</div>
+            <div style={styles.detailValue}>{product.thickness}</div>
+          </div>
+        ) : null}
+
         {product.country_of_origin ? (
           <div style={detailRowStyle}>
             <div style={styles.detailLabel}>Country of Origin</div>
@@ -222,46 +315,56 @@ export default function ProductDrawer({
 
       {lovePoints.length > 0 ? (
         <div style={styles.detailBlock}>
-          <div style={styles.detailLabel}>Why People Love It</div>
-          <ul style={styles.loveList}>
+          <div
+            style={
+              isMobileViewport ? styles.loveRowMobile : styles.loveRow
+            }
+          >
+            <div style={styles.detailLabel}>Why People Love It</div>
+            <ul style={styles.loveList}>
             {lovePoints.map((point, index) => (
               <li key={`${index}-${point}`} style={styles.loveItem}>
                 {point}
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         </div>
       ) : null}
 
       {!isMobileViewport ? (
-        <div style={purchaseRowStyle}>
-          <div style={styles.drawerPriceGroup}>
-            <div style={priceStyle}>₱ {formatMoney(product.selling_price)}</div>
-            <div style={styles.drawerPer}>for</div>
-            {formatSize(product) ? (
-              <div style={formatStyle}>{formatSize(product)}</div>
-            ) : null}
+        <div style={styles.purchaseInfoStack}>
+          <div style={detailRowStyle}>
+            <div style={styles.detailLabel}>Format</div>
+            <div style={styles.detailValue}>{formatSize(product) || "—"}</div>
           </div>
-          <div style={qtyRowStyle}>
-            <AppButton
-              type="button"
-              variant="ghost"
-              style={qtyBtnStyle}
-              onClick={() => productId && onRemove(productId)}
-              disabled={!productId}
-            >
-              <QtyIcon type="minus" />
-            </AppButton>
-            <div style={{ ...qtyTextStyle, width: 44 }}>{qty}</div>
-            <AppButton
-              type="button"
-              variant="ghost"
-              style={qtyBtnStyle}
-              onClick={() => productId && onAdd(productId)}
-              disabled={!productId}
-            >
-              <QtyIcon type="plus" />
-            </AppButton>
+          <div style={{ ...detailRowStyle, ...styles.priceRowSpacing }}>
+            <div style={styles.detailLabel}>Price</div>
+            <div style={priceStyle}>₱ {formatMoney(product.selling_price)}</div>
+          </div>
+          <div style={detailRowStyle}>
+            <div style={styles.detailLabel}>Add to cart</div>
+            <div style={qtyRowStyle}>
+              <AppButton
+                type="button"
+                variant="ghost"
+                style={qtyBtnStyle}
+                onClick={() => productId && onRemove(productId)}
+                disabled={!productId}
+              >
+                <QtyIcon type="minus" />
+              </AppButton>
+              <div style={{ ...qtyTextStyle, width: 44 }}>{qty}</div>
+              <AppButton
+                type="button"
+                variant="ghost"
+                style={qtyBtnStyle}
+                onClick={() => productId && onAdd(productId)}
+                disabled={!productId}
+              >
+                <QtyIcon type="plus" />
+              </AppButton>
+            </div>
           </div>
         </div>
       ) : null}
@@ -301,6 +404,100 @@ export default function ProductDrawer({
           ) : null}
         </div>
       ) : null}
+
+      <div style={styles.detailBlockWide}>
+        <div
+          style={
+            isMobileViewport
+              ? { ...styles.shopWhyHeaderRow, ...styles.shopWhyHeaderRowMobile }
+              : styles.shopWhyHeaderRow
+          }
+        >
+          <div style={styles.shopWhyEyebrow}>Why shop from us</div>
+          <div style={styles.shopWhyTitle}>GOOD QUALITY AND FAST DELIVERY AT THE RIGHT PRICE</div>
+        </div>
+        <div
+          style={
+            isMobileViewport
+              ? { ...styles.shopWhyRow, ...styles.shopWhyRowMobile }
+              : styles.shopWhyRow
+          }
+        >
+          <div style={styles.shopWhyCard}>
+            <div style={styles.shopWhyBadge}>FREE SHIPPING</div>
+            <button
+              type="button"
+              style={styles.shopWhyLinkBtn}
+              onClick={() => setDeliveryPricingOpen(true)}
+            >
+              See minimum spending per area to unlock FREE delivery every time.
+            </button>
+          </div>
+          <div style={styles.shopWhyCard}>
+            <div style={styles.shopWhyBadge}>IN STOCK</div>
+            <div style={styles.shopWhyText}>Ready for immediate preparation from our temperature controlled storage.</div>
+          </div>
+          <div style={styles.shopWhyCard}>
+            <div style={styles.shopWhyBadge}>EXPRESS / SAME-DAY DELIVERY</div>
+            <div style={styles.shopWhyText}>Order before 9pm to enjoy same day EXPRESS delivery.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.detailBlockWide}>
+        <div style={{ ...styles.stripTitle, marginTop: 20 }}>Products From The Same Category</div>
+        <div style={styles.productStripWrap}>
+          <button
+            type="button"
+            aria-label="Previous related products"
+            onClick={() => scrollRelatedBy(-1)}
+            disabled={!canScrollRelatedLeft}
+            style={{
+              ...styles.stripArrowBtn,
+              ...(canScrollRelatedLeft ? null : styles.stripArrowBtnDisabled),
+            }}
+          >
+            <StripChevronIcon direction="left" />
+          </button>
+        <div ref={relatedStripRef} style={styles.productStripRow}>
+          {relatedProducts.length === 0 ? (
+            <div style={styles.drawerDescMuted}>No related products yet.</div>
+          ) : (
+            relatedProducts.map((item) => {
+              const id = String(item.id);
+              const itemQty = Math.max(0, Number(cartQtyById[id] ?? 0));
+              return (
+                <div key={id} style={styles.stripTileWrap}>
+                  <ProductCard
+                    product={item}
+                    qty={itemQty}
+                    viewMode="4"
+                    onOpen={(nextId) => onOpenProduct?.(nextId)}
+                    onAdd={onAdd}
+                    onRemove={onRemove}
+                    onSetQty={(nextId, nextQty) => onSetQty?.(nextId, nextQty)}
+                    formatMoney={formatMoney}
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
+          <button
+            type="button"
+            aria-label="Next related products"
+            onClick={() => scrollRelatedBy(1)}
+            disabled={!canScrollRelatedRight}
+            style={{
+              ...styles.stripArrowBtn,
+              ...(canScrollRelatedRight ? null : styles.stripArrowBtnDisabled),
+            }}
+          >
+            <StripChevronIcon direction="right" />
+          </button>
+        </div>
+      </div>
+
     </>
   );
 
@@ -465,6 +662,78 @@ export default function ProductDrawer({
           </div>
         ) : null}
       </aside>
+      {deliveryPricingOpen ? (
+        <div
+          style={styles.deliveryPricingBackdrop}
+          onClick={() => setDeliveryPricingOpen(false)}
+          role="presentation"
+        >
+          <div
+            style={styles.deliveryPricingModal}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delivery pricing matrix"
+          >
+            <div style={styles.deliveryPricingHeader}>
+              <div style={styles.deliveryPricingTitle}>DELIVERY PRICING MATRIX</div>
+              <AppButton
+                type="button"
+                variant="ghost"
+                style={styles.deliveryPricingCloseBtn}
+                onClick={() => setDeliveryPricingOpen(false)}
+              >
+                CLOSE
+              </AppButton>
+            </div>
+            <div style={styles.deliveryPricingSubtitle}>
+              Free delivery is automatically unlocked once your subtotal reaches the minimum for your area.
+            </div>
+
+            {isMobileViewport ? (
+              <div style={styles.deliveryPricingCardList}>
+                {deliveryPricingRows.map((row) => (
+                  <div key={`${row.postalCodes}-${row.area}`} style={styles.deliveryPricingCard}>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Area</span>
+                      <span style={styles.deliveryPricingCardValue}>{row.area}</span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Free from</span>
+                      <span style={styles.deliveryPricingCardValue}>₱ {formatMoney(row.freeFromPhp)}</span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Fee below min</span>
+                      <span style={styles.deliveryPricingCardValue}>₱ {formatMoney(row.feeBelowMinPhp)}</span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Postcode(s)</span>
+                      <span style={styles.deliveryPricingCardValue}>{row.postalCodes}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={styles.deliveryPricingTableWrap}>
+                <div style={styles.deliveryPricingTableHeaderRow}>
+                  <div style={styles.deliveryPricingHeaderCell}>AREA</div>
+                  <div style={styles.deliveryPricingHeaderCell}>FREE DELIVERY FROM</div>
+                  <div style={styles.deliveryPricingHeaderCell}>FEE BELOW MIN</div>
+                  <div style={styles.deliveryPricingHeaderCell}>POSTCODE(S)</div>
+                </div>
+                {deliveryPricingRows.map((row) => (
+                  <div key={`${row.postalCodes}-${row.area}`} style={styles.deliveryPricingBodyRow}>
+                    <div style={styles.deliveryPricingCell}>{row.area}</div>
+                    <div style={styles.deliveryPricingCell}>₱ {formatMoney(row.freeFromPhp)}</div>
+                    <div style={styles.deliveryPricingCell}>₱ {formatMoney(row.feeBelowMinPhp)}</div>
+                    <div style={styles.deliveryPricingCell}>{row.postalCodes}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -596,7 +865,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   drawerGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 0.8fr) minmax(0, 1fr)",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
     gridTemplateRows: "auto auto",
     gap: 32,
     alignItems: "start",
@@ -663,10 +932,11 @@ const styles: Record<string, React.CSSProperties> = {
     background: "transparent",
   },
   mainImageFrame: {
-    width: "80%",
+    width: "100%",
     aspectRatio: "1 / 1",
     borderRadius: 14,
     background: "transparent",
+    border: "1px solid var(--tp-border-color-soft)",
     overflow: "hidden",
     position: "relative",
     cursor: "pointer",
@@ -708,12 +978,12 @@ const styles: Record<string, React.CSSProperties> = {
   mainImage: {
     width: "100%",
     height: "100%",
-    objectFit: "contain",
+    objectFit: "cover",
     borderRadius: 0,
   },
   thumbRow: {
     marginTop: 12,
-    width: "calc(80% - 24px)",
+    width: "calc(100% - 24px)",
     display: "flex",
     gap: 10,
     padding: 12,
@@ -748,7 +1018,7 @@ const styles: Record<string, React.CSSProperties> = {
   drawerDetailStack: {
     marginTop: 0,
     display: "grid",
-    gap: 8,
+    gap: 9,
   },
   drawerName: {
     fontSize: 24,
@@ -762,7 +1032,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 0,
   },
   detailBlock: {
-    marginTop: 30,
+    marginTop: 8,
     display: "grid",
     gap: 8,
   },
@@ -792,20 +1062,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     color: "var(--tp-text-color)",
   },
-  drawerPurchaseRow: {
-    marginTop: 24,
-    display: "flex",
-    alignItems: "center",
-    gap: 50,
-    flexWrap: "wrap",
-  },
-  drawerPurchaseRowDesktop: {
+  purchaseInfoStack: {
     marginTop: 44,
     marginBottom: 20,
-    display: "flex",
-    alignItems: "center",
-    gap: 60,
-    flexWrap: "wrap",
+    display: "grid",
+    gap: 9,
+  },
+  priceRowSpacing: {
+    marginBottom: 10,
   },
   drawerPriceGroup: {
     display: "inline-flex",
@@ -849,9 +1113,20 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
   },
   loveList: {
-    margin: "6px 0 0",
+    margin: 0,
     paddingLeft: 0,
     listStyle: "none",
+  },
+  loveRow: {
+    display: "grid",
+    gridTemplateColumns: "170px minmax(0,1fr)",
+    alignItems: "start",
+    columnGap: 10,
+  },
+  loveRowMobile: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    rowGap: 6,
   },
   loveItem: {
     display: "block",
@@ -943,5 +1218,230 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
     flexWrap: "nowrap",
+  },
+  shopWhyEyebrow: {
+    fontSize: 16,
+    opacity: 0.65,
+    letterSpacing: 0.2,
+  },
+  shopWhyHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "170px minmax(0,1fr)",
+    alignItems: "baseline",
+    columnGap: 10,
+    marginBottom: 5,
+  },
+  shopWhyHeaderRowMobile: {
+    gridTemplateColumns: "1fr",
+    rowGap: 6,
+  },
+  shopWhyTitle: {
+    fontSize: 22.4,
+    fontWeight: 900,
+    letterSpacing: 0.6,
+  },
+  shopWhyRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(220px, 1fr))",
+    gap: 10,
+    marginLeft: 180,
+    width: "calc(100% - 180px)",
+  },
+  shopWhyRowMobile: {
+    gridTemplateColumns: "1fr",
+    marginLeft: 0,
+    width: "100%",
+  },
+  shopWhyCard: {
+    borderRadius: 12,
+    border: "1px solid var(--tp-border-color-soft)",
+    background: "transparent",
+    padding: 14,
+    minHeight: 112,
+  },
+  shopWhyBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    minHeight: 42,
+    padding: "0 12px",
+    fontWeight: 900,
+    fontSize: 13,
+    lineHeight: 1.2,
+    textAlign: "center",
+    color: "#0c2b58",
+    background: "#f4c400",
+    marginBottom: 10,
+  },
+  shopWhyBadgePlain: {
+    fontWeight: 900,
+    fontSize: 13,
+    letterSpacing: 0.2,
+    marginBottom: 10,
+  },
+  shopWhyText: {
+    fontSize: 14,
+    lineHeight: 1.45,
+    opacity: 0.84,
+  },
+  shopWhyLinkBtn: {
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    textAlign: "left",
+    padding: 0,
+    margin: 0,
+    fontSize: 14,
+    lineHeight: 1.45,
+    opacity: 0.92,
+    cursor: "pointer",
+    textDecoration: "underline",
+    textUnderlineOffset: 3,
+  },
+  deliveryPricingBackdrop: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 2100,
+    background: "rgba(0, 0, 0, 0.66)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  deliveryPricingModal: {
+    width: "min(980px, calc(100vw - 32px))",
+    maxHeight: "min(82vh, 920px)",
+    overflowY: "auto",
+    borderRadius: 14,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-page-bg)",
+    boxShadow: "0 20px 56px rgba(0,0,0,0.45)",
+    padding: 16,
+  },
+  deliveryPricingHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 8,
+  },
+  deliveryPricingTitle: {
+    fontSize: 20,
+    fontWeight: 900,
+    letterSpacing: 0.6,
+  },
+  deliveryPricingCloseBtn: {
+    height: 34,
+    minWidth: 86,
+    borderRadius: 10,
+    padding: "0 14px",
+  },
+  deliveryPricingSubtitle: {
+    fontSize: 14,
+    lineHeight: 1.5,
+    opacity: 0.84,
+    marginBottom: 14,
+  },
+  deliveryPricingTableWrap: {
+    border: "1px solid var(--tp-border-color-soft)",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  deliveryPricingTableHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr 1fr 1fr 1.2fr",
+    background: "var(--tp-control-bg-soft)",
+    borderBottom: "1px solid var(--tp-border-color-soft)",
+  },
+  deliveryPricingHeaderCell: {
+    padding: "10px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: 0.5,
+    opacity: 0.84,
+  },
+  deliveryPricingBodyRow: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr 1fr 1fr 1.2fr",
+    borderBottom: "1px solid var(--tp-border-color-soft)",
+  },
+  deliveryPricingCell: {
+    padding: "10px 12px",
+    fontSize: 14,
+    lineHeight: 1.4,
+  },
+  deliveryPricingCardList: {
+    display: "grid",
+    gap: 10,
+  },
+  deliveryPricingCard: {
+    borderRadius: 12,
+    border: "1px solid var(--tp-border-color-soft)",
+    padding: 12,
+    background: "var(--tp-control-bg-soft)",
+  },
+  deliveryPricingCardRow: {
+    display: "grid",
+    gridTemplateColumns: "110px 1fr",
+    gap: 8,
+    alignItems: "start",
+    marginBottom: 6,
+  },
+  deliveryPricingCardLabel: {
+    fontSize: 12,
+    letterSpacing: 0.4,
+    opacity: 0.74,
+    textTransform: "uppercase",
+  },
+  deliveryPricingCardValue: {
+    fontSize: 14,
+    lineHeight: 1.4,
+  },
+  stripTitle: {
+    fontSize: 16,
+    letterSpacing: 0.2,
+    opacity: 0.65,
+    marginBottom: 12,
+  },
+  productStripWrap: {
+    display: "grid",
+    gridTemplateColumns: "46px minmax(0,1fr) 46px",
+    gap: 0,
+    alignItems: "stretch",
+  },
+  productStripRow: {
+    display: "grid",
+    gridAutoFlow: "column",
+    gridAutoColumns: "minmax(220px, 220px)",
+    gap: 10,
+    overflowX: "hidden",
+    paddingBottom: 4,
+    scrollSnapType: "x mandatory",
+  },
+  stripArrowBtn: {
+    width: "100%",
+    height: "100%",
+    minHeight: 100,
+    borderRadius: 0,
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    fontSize: 0,
+    lineHeight: 0,
+    padding: 0,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stripArrowBtnDisabled: {
+    opacity: 0.35,
+    cursor: "default",
+  },
+  stripTileWrap: {
+    width: 220,
+    minWidth: 220,
+    scrollSnapAlign: "start",
   },
 };

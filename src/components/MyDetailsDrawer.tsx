@@ -6,6 +6,13 @@ import {
   TOPBAR_FONT_SIZE,
   TOPBAR_FONT_SIZE_MOBILE,
 } from "@/components/ui";
+import {
+  composeCustomerFullName,
+  ensureCustomerRecord,
+  fetchCustomerById,
+  linkProfileToCustomer,
+} from "@/lib/customersApi";
+import { formatCurrencyPHP } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
 type Props = {
@@ -62,6 +69,8 @@ export default function MyDetailsDrawer({
   const [error, setError] = React.useState("");
   const [hasLoaded, setHasLoaded] = React.useState(false);
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
+  const [availableSteakCredits, setAvailableSteakCredits] = React.useState(0);
+  const [linkedCustomerId, setLinkedCustomerId] = React.useState<string | null>(null);
   const lastSavedRef = React.useRef<string>("");
 
   React.useEffect(() => {
@@ -89,7 +98,7 @@ export default function MyDetailsDrawer({
       const { data, error: profileError } = await supabase
         .from("profiles")
         .select(
-          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,delivery_note,country"
+          "first_name,last_name,phone,attention_to,address_line1,address_line2,barangay,city,province,postal_code,delivery_note,country,customer_id"
         )
         .eq("id", userId)
         .maybeSingle();
@@ -97,6 +106,8 @@ export default function MyDetailsDrawer({
       if (profileError) {
         setError(profileError.message);
         setDraft(EMPTY_DRAFT);
+        setLinkedCustomerId(null);
+        setAvailableSteakCredits(0);
         setLoading(false);
         return;
       }
@@ -115,6 +126,23 @@ export default function MyDetailsDrawer({
         delivery_note: data?.delivery_note ?? "",
         country: "Philippines",
       });
+      const customerId = data?.customer_id ? String(data.customer_id) : null;
+      setLinkedCustomerId(customerId);
+      if (customerId) {
+        try {
+          const customer = await fetchCustomerById(customerId);
+          setAvailableSteakCredits(Math.max(0, Number(customer?.available_steak_credits ?? 0)));
+        } catch (customerError) {
+          console.error("Failed to load linked customer credits", customerError);
+          setAvailableSteakCredits(0);
+        }
+      } else {
+        setAvailableSteakCredits(0);
+      }
+      const loadedFirstName = String(data?.first_name ?? "").trim();
+      if (loadedFirstName && onProfileSaved) {
+        onProfileSaved(loadedFirstName);
+      }
       lastSavedRef.current = JSON.stringify({
         first_name: data?.first_name ?? "",
         last_name: data?.last_name ?? "",
@@ -134,7 +162,7 @@ export default function MyDetailsDrawer({
     };
 
     loadProfile();
-  }, [isOpen, userId]);
+  }, [isOpen, onProfileSaved, userId]);
 
   if (!isOpen) return null;
 
@@ -195,6 +223,42 @@ export default function MyDetailsDrawer({
       if (onProfileSaved) {
         onProfileSaved(draft.first_name.trim());
       }
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const customer = await ensureCustomerRecord({
+          firstName: draft.first_name,
+          lastName: draft.last_name,
+          fullName: composeCustomerFullName({
+            firstName: draft.first_name,
+            lastName: draft.last_name,
+          }),
+          phone: draft.phone,
+          email: user?.email ?? null,
+          address: [
+            draft.attention_to,
+            draft.line1,
+            draft.line2,
+            draft.barangay,
+            draft.city,
+            draft.province,
+            draft.postal_code,
+            draft.country || "Philippines",
+          ]
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean)
+            .join(", "),
+          notes: draft.delivery_note,
+        });
+        if (customer.id !== linkedCustomerId) {
+          await linkProfileToCustomer(userId, customer.id);
+          setLinkedCustomerId(customer.id);
+        }
+        setAvailableSteakCredits(Math.max(0, customer.available_steak_credits));
+      } catch (customerError) {
+        console.error("Failed to sync linked customer", customerError);
+      }
     }
     setLoading(false);
   };
@@ -250,6 +314,14 @@ export default function MyDetailsDrawer({
             ...(isMobileViewport ? styles.contentMobile : null),
           }}
         >
+          <div style={styles.creditsCard}>
+            <div style={styles.creditsRow}>
+              <div style={styles.creditsTitle}>
+                Available Steak Credits: {formatCurrencyPHP(availableSteakCredits)}
+              </div>
+              <div style={styles.creditsSubtext}>Available to use for your next order.</div>
+            </div>
+          </div>
           <div style={styles.card}>
             <div style={{ ...styles.row2, ...(isMobileViewport ? styles.row2Mobile : null) }}>
               <div style={rowStyle}>
@@ -483,6 +555,34 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 0,
     padding: 0,
     color: "var(--tp-text-color)",
+  },
+  creditsCard: {
+    maxWidth: "min(1120px, 100%)",
+    marginBottom: 20,
+    padding: "16px 18px",
+    borderRadius: 14,
+    border: "1px solid var(--tp-accent)",
+    background: "rgba(184, 153, 88, 0.08)",
+    color: "var(--tp-accent)",
+  },
+  creditsRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    flexWrap: "wrap",
+  },
+  creditsTitle: {
+    fontSize: 18,
+    fontWeight: 800,
+    lineHeight: 1.35,
+  },
+  creditsSubtext: {
+    fontSize: 14,
+    opacity: 0.92,
+    lineHeight: 1.4,
+    textAlign: "right",
+    whiteSpace: "nowrap",
   },
   addressSectionLabel: {
     marginTop: 20,
