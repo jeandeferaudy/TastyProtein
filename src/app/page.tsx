@@ -4373,7 +4373,7 @@ React.useEffect(() => {
           style={{
             ...styles.listScroll,
             ...(mainZoneStyle ?? null),
-            height: `calc(100vh - ${topOffset}px)`,
+            height: `calc(var(--tp-app-height, 100vh) - ${topOffset}px)`,
           }}
         >
           {activeBanner && String(activeBanner.image_url ?? "").trim() ? (
@@ -4447,7 +4447,7 @@ React.useEffect(() => {
               <aside
                 style={{
                   ...styles.filterPanel,
-                  maxHeight: `calc(100vh - ${topOffset + 30}px)`,
+                  maxHeight: `calc(var(--tp-app-height, 100vh) - ${topOffset + 30}px)`,
                 }}
                 onWheel={(e) => e.stopPropagation()}
                 onTouchMove={(e) => e.stopPropagation()}
@@ -5085,13 +5085,13 @@ React.useEffect(() => {
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
-    minHeight: "100vh",
+    minHeight: "var(--tp-app-height, 100vh)",
     background: "var(--tp-page-bg)",
     color: "var(--tp-text-color)",
     fontFamily: "var(--tp-font-family, Arial, Helvetica, sans-serif)",
   },
   pageInner: {
-    minHeight: "100vh",
+    minHeight: "var(--tp-app-height, 100vh)",
   },
   loaderWrap: {
     position: "fixed",
@@ -5202,7 +5202,7 @@ const styles: Record<string, React.CSSProperties> = {
     overscrollBehaviorY: "contain",
     position: "relative",
     zIndex: 10,
-    paddingBottom: 20,
+    paddingBottom: "calc(96px + env(safe-area-inset-bottom, 0px))",
   },
   bannerWrap: {
     width: "100%",
@@ -5401,7 +5401,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   mobileFilterModal: {
     width: "min(520px, calc(100vw - 20px))",
-    maxHeight: "80vh",
+    maxHeight: "calc(var(--tp-app-height, 100vh) - 20px)",
     overflow: "hidden",
     border: "1px solid var(--tp-border-color)",
     borderRadius: 12,

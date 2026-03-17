@@ -90,7 +90,7 @@ export default function ProductDrawer({
   formatMoney,
 }: Props) {
   const panelTop = Math.max(topOffset, 0);
-  const panelHeight = `calc(100vh - ${panelTop}px)`;
+  const panelHeight = `calc(var(--tp-app-height, 100vh) - ${panelTop}px)`;
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const [deliveryPricingOpen, setDeliveryPricingOpen] = React.useState(false);
   const relatedStripRef = React.useRef<HTMLDivElement | null>(null);
@@ -553,7 +553,7 @@ export default function ProductDrawer({
           ...styles.backdrop,
           ...(backgroundStyle ?? null),
           top: isMobileViewport ? 0 : panelTop,
-          height: isMobileViewport ? "100vh" : panelHeight,
+          height: isMobileViewport ? "var(--tp-app-height, 100vh)" : panelHeight,
           ...(isMobileViewport
             ? {
                 zIndex: 1450,
@@ -568,7 +568,7 @@ export default function ProductDrawer({
           ...styles.productPanel,
           ...(backgroundStyle ?? null),
           top: isMobileViewport ? 0 : panelTop,
-          height: isMobileViewport ? "100vh" : panelHeight,
+          height: isMobileViewport ? "var(--tp-app-height, 100vh)" : panelHeight,
           ...(isMobileViewport
             ? {
                 zIndex: 1500,

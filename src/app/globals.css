@@ -1,6 +1,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --tp-app-height: 100vh;
   --tp-rail-width: min(80vw, 1440px);
   --tp-text-color: #ffffff;
   --tp-border-color: rgba(255, 255, 255, 0.2);
@@ -16,6 +17,12 @@
   --tp-cta-border: #ffffff;
   --tp-accent: #66c7ff;
   --tp-checkbox-color: rgba(255, 255, 255, 0.7);
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --tp-app-height: 100dvh;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

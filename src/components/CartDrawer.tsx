@@ -338,7 +338,7 @@ const styles: Record<string, React.CSSProperties> = {
     right: 0,
     width: 420,
     maxWidth: "92vw",
-    height: "100vh",
+    height: "var(--tp-app-height, 100vh)",
 
     // ✅ IMPORTANT: fully opaque panel (removes “faded” look)
     background: "transparent",
@@ -510,7 +510,7 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   footer: {
-    padding: "16px 16px 36px",
+    padding: "16px 16px calc(20px + env(safe-area-inset-bottom, 0px))",
     borderTop: "1px solid var(--tp-border-color-soft)",
   },
   totalRow: {
