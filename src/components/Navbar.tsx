@@ -11,8 +11,6 @@ import {
 const NAV_CONTROL_H = 36;
 const NAV_SECTION_GAP = 12;
 const NAV_INLINE_GAP = 10;
-const NAV_AUTH_DESKTOP_OFFSET = 14;
-
 type Props = {
   search: string;
   setSearch: (v: string) => void;
@@ -26,6 +24,7 @@ type Props = {
   onOpenAuth: () => void;
   onOpenProfile: () => void;
   onOpenOrders: () => void;
+  onOpenReviews: () => void;
   isAdmin: boolean;
   editMode: boolean;
   onToggleEditMode: (next: boolean) => void;
@@ -33,9 +32,13 @@ type Props = {
   onOpenAllCustomers: () => void;
   onOpenAllPurchases: () => void;
   onOpenAllProducts: () => void;
+  onOpenAdminReviews: () => void;
   onOpenInventory: () => void;
   onOpenAnalytics: () => void;
   onLogout: () => void;
+  reviewsToSubmitCount?: number;
+  reviewsToApproveCount?: number;
+  notCompletedOrdersCount?: number;
   navTone?: "dark-bg" | "light-bg";
   zoneStyle?: React.CSSProperties;
   showZoneEditor?: boolean;
@@ -58,6 +61,7 @@ export default function Navbar({
   onOpenAuth,
   onOpenProfile,
   onOpenOrders,
+  onOpenReviews,
   isAdmin,
   editMode,
   onToggleEditMode,
@@ -65,9 +69,13 @@ export default function Navbar({
   onOpenAllCustomers,
   onOpenAllPurchases,
   onOpenAllProducts,
+  onOpenAdminReviews,
   onOpenInventory,
   onOpenAnalytics,
   onLogout,
+  reviewsToSubmitCount = 0,
+  reviewsToApproveCount = 0,
+  notCompletedOrdersCount = 0,
   navTone = "light-bg",
   zoneStyle,
   showZoneEditor = false,
@@ -115,6 +123,202 @@ export default function Navbar({
   const navCenterWidth = !isMobile
     ? `min(1000px, calc(var(--tp-rail-width) - ${searchStartOffset}px + 20px))`
     : "100%";
+  const renderMenuLabel = React.useCallback(
+    (label: string, count?: number) => (
+      <span style={styles.menuItemRow}>
+        <span>{label}</span>
+        {count && count > 0 ? <span style={styles.menuBadge}>{count}</span> : null}
+      </span>
+    ),
+    []
+  );
+  const authControl = (
+    <div
+      ref={authWrapRef}
+      style={{
+        ...styles.authWrap,
+        ...(isMobile ? null : styles.authWrapCenterDesktop),
+      }}
+    >
+      {authLabel ? (
+        <button
+          type="button"
+          style={{
+            ...styles.userButton,
+            ...(editMode ? styles.userBtnEditMode : null),
+          }}
+          onClick={() => setAuthMenuOpen((v) => !v)}
+          aria-label="Account menu"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path
+              d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.3 0-6 2.1-6 4.7V20h12v-1.3c0-2.6-2.7-4.7-6-4.7Z"
+              fill="currentColor"
+            />
+          </svg>
+          {authDisplayName ? (
+            <span style={styles.userName} title={authDisplayName}>
+              {authDisplayName}
+            </span>
+          ) : authInitial ? (
+            <span style={styles.userName} title={authInitial}>
+              {authInitial}
+            </span>
+          ) : null}
+        </button>
+      ) : (
+        <AppButton
+          variant="nav"
+          style={{
+            ...styles.navBtn,
+            ...(isMobile ? styles.navBtnMobile : styles.navLoginDesktopCenter),
+          }}
+          onClick={onOpenAuth}
+        >
+          Login
+        </AppButton>
+      )}
+      {authLabel && authMenuOpen ? (
+        <div style={styles.authMenu}>
+          <button
+            type="button"
+            style={styles.menuItem}
+            onClick={() => {
+              setAuthMenuOpen(false);
+              onOpenProfile();
+            }}
+          >
+            {renderMenuLabel("Profile")}
+          </button>
+          <button
+            type="button"
+            style={styles.menuItem}
+            onClick={() => {
+              setAuthMenuOpen(false);
+              onOpenOrders();
+            }}
+          >
+            {renderMenuLabel("My Orders")}
+          </button>
+          <button
+            type="button"
+            style={styles.menuItem}
+            onClick={() => {
+              setAuthMenuOpen(false);
+              onOpenReviews();
+            }}
+          >
+            {renderMenuLabel("My Reviews", reviewsToSubmitCount)}
+          </button>
+
+          {isAdmin && (
+            <>
+              <div style={styles.menuDivider} />
+              <div style={styles.menuLabel}>ADMIN</div>
+
+              <label style={styles.toggleRow}>
+                <span>Edit Mode</span>
+                <input
+                  type="checkbox"
+                  checked={editMode}
+                  onChange={(e) => onToggleEditMode(e.target.checked)}
+                  style={styles.editModeToggle}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAllProducts();
+                }}
+              >
+                {renderMenuLabel("Products")}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAllOrders();
+                }}
+              >
+                {renderMenuLabel("Orders", notCompletedOrdersCount)}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAdminReviews();
+                }}
+              >
+                {renderMenuLabel("Reviews", reviewsToApproveCount)}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAllCustomers();
+                }}
+              >
+                {renderMenuLabel("Customers")}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAllPurchases();
+                }}
+              >
+                {renderMenuLabel("Purchases")}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenInventory();
+                }}
+              >
+                {renderMenuLabel("Inventory")}
+              </button>
+
+              <button
+                type="button"
+                style={styles.menuItem}
+                onClick={() => {
+                  setAuthMenuOpen(false);
+                  onOpenAnalytics();
+                }}
+              >
+                {renderMenuLabel("Analytics")}
+              </button>
+            </>
+          )}
+
+          <AppButton
+            variant="nav"
+            style={styles.authMenuLogoutBtn}
+            onClick={() => {
+              setAuthMenuOpen(false);
+              onLogout();
+            }}
+          >
+            Logout
+          </AppButton>
+        </div>
+      ) : null}
+    </div>
+  );
   return (
     <nav
       className="tp-navbar"
@@ -132,6 +336,7 @@ export default function Navbar({
         <div
           style={{
             ...styles.navLeft,
+            ...(!isMobile ? styles.navLeftDesktop : null),
             ...(isMobile ? styles.navLeftMobile : null),
             minWidth:
               !isMobile && searchStartOffset > 0 ? searchStartOffset : undefined,
@@ -152,259 +357,64 @@ export default function Navbar({
             Shop
           </AppButton>
 
-          {authLabel ? (
-            <div
-              ref={authWrapRef}
-              style={{
-                ...styles.authWrap,
-                ...(!isMobile ? { marginLeft: NAV_AUTH_DESKTOP_OFFSET } : null),
-              }}
-            >
-              <button
-                type="button"
-                style={{
-                  ...styles.userButton,
-                  ...(editMode ? styles.userBtnEditMode : null),
-                }}
-                onClick={() => setAuthMenuOpen((v) => !v)}
-                aria-label="Account menu"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                  <path
-                    d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.3 0-6 2.1-6 4.7V20h12v-1.3c0-2.6-2.7-4.7-6-4.7Z"
-                    fill="currentColor"
-                  />
-                </svg>
-                {authDisplayName ? (
-                  <span style={styles.userName} title={authDisplayName}>
-                    {authDisplayName}
-                  </span>
-                ) : authInitial ? (
-                  <span style={styles.userName} title={authInitial}>
-                    {authInitial}
-                  </span>
-                ) : null}
-              </button>
-              {authMenuOpen && (
-                <div style={styles.authMenu}>
-                  <button
-                    type="button"
-                    style={styles.menuItem}
-                    onClick={() => {
-                      setAuthMenuOpen(false);
-                      onOpenProfile();
-                    }}
-                  >
-                    Profile
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.menuItem}
-                    onClick={() => {
-                      setAuthMenuOpen(false);
-                      onOpenOrders();
-                    }}
-                  >
-                    My Orders
-                  </button>
-
-                  {isAdmin && (
-                    <>
-                      <div style={styles.menuDivider} />
-                      <div style={styles.menuLabel}>ADMIN</div>
-
-                      <label style={styles.toggleRow}>
-                        <span>Edit Mode</span>
-                        <input
-                          type="checkbox"
-                          checked={editMode}
-                          onChange={(e) => onToggleEditMode(e.target.checked)}
-                          style={styles.editModeToggle}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenAllProducts();
-                        }}
-                      >
-                        Products
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenAllOrders();
-                        }}
-                      >
-                        Orders
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenAllCustomers();
-                        }}
-                      >
-                        Customers
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenAllPurchases();
-                        }}
-                      >
-                        Purchases
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenInventory();
-                        }}
-                      >
-                        Inventory
-                      </button>
-
-                      <button
-                        type="button"
-                        style={styles.menuItem}
-                        onClick={() => {
-                          setAuthMenuOpen(false);
-                          onOpenAnalytics();
-                        }}
-                      >
-                        Analytics
-                      </button>
-                    </>
-                  )}
-
-                  <AppButton
-                    variant="nav"
-                    style={styles.authMenuLogoutBtn}
-                    onClick={() => {
-                      setAuthMenuOpen(false);
-                      onLogout();
-                    }}
-                  >
-                    Logout
-                  </AppButton>
-                </div>
-              )}
-            </div>
-          ) : (
-            <AppButton
-              variant="nav"
-              style={{
-                ...styles.navBtn,
-                ...(isMobile ? styles.navBtnMobile : null),
-                ...(!isMobile ? { marginLeft: NAV_AUTH_DESKTOP_OFFSET } : null),
-              }}
-              onClick={onOpenAuth}
-            >
-              Login
-            </AppButton>
-          )}
+          {isMobile ? authControl : null}
         </div>
 
-        {showSearch ? (
-          <div
-            style={{
-              ...styles.navCenter,
-              ...(isMobile ? styles.navCenterMobile : styles.navCenterDesktop),
-            }}
-          >
-            <div
-              style={{
-                ...styles.navSearchWrap,
-                ...(isMobile ? styles.navSearchWrapMobile : styles.navSearchWrapDesktop),
-              }}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                aria-hidden="true"
+        <div
+          style={{
+            ...styles.navCenter,
+            ...(isMobile ? styles.navCenterMobile : styles.navCenterDesktop),
+          }}
+        >
+          {!isMobile ? (
+            <>
+              <div
                 style={{
-                  ...styles.navSearchIcon,
-                  ...(isMobile ? styles.navSearchIconMobile : null),
+                  ...styles.viewToggleWrapCenter,
+                  ...(showSearch ? null : styles.centerControlsHidden),
                 }}
+                aria-hidden={!showSearch}
               >
-                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" fill="none" />
-                <path d="M16.5 16.5L21 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <input
-                className="tp-nav-search"
-                style={{ ...styles.navSearchInput, ...(isMobile ? styles.navSearchMobile : null) }}
-                placeholder="Search here"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Search products"
-              />
-              {search.trim().length > 0 && (
-                <button
-                  type="button"
-                  style={styles.navClearText}
-                  onClick={() => setSearch("")}
-                  aria-label="Clear search"
-                  title="Clear search"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            {!isMobile ? (
-              <div style={styles.viewToggleWrapCenter}>
-                <div style={{ ...styles.viewToggle, ...(isMobile ? styles.viewToggleMobile : null) }}>
+                  <div style={{ ...styles.viewToggle, ...(isMobile ? styles.viewToggleMobile : null) }}>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.viewBtn,
+                        ...(isMobile ? styles.viewBtnMobile : null),
+                        ...(gridView === "list" ? styles.viewBtnActive : null),
+                      }}
+                      onClick={() => onChangeGridView("list")}
+                      aria-label="List view"
+                      title="List view"
+                      tabIndex={showSearch ? 0 : -1}
+                    >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="24"
+                      height="24"
+                      aria-hidden="true"
+                      style={{ display: "block", transform: "translate(2px, -1px)" }}
+                    >
+                      <path
+                        d="M5 6h14M5 12h14M5 18h14"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     style={{
                       ...styles.viewBtn,
                       ...(isMobile ? styles.viewBtnMobile : null),
-                      ...(gridView === "list" ? styles.viewBtnActive : null),
+                      ...(gridView === "4" ? styles.viewBtnActive : null),
                     }}
-                    onClick={() => onChangeGridView("list")}
-                    aria-label="List view"
-                    title="List view"
+                    onClick={() => onChangeGridView("4")}
+                    aria-label="3-up grid view"
+                    title="3-up grid view"
+                    tabIndex={showSearch ? 0 : -1}
                   >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="24"
-                    height="24"
-                    aria-hidden="true"
-                    style={{ display: "block", transform: "translate(2px, -1px)" }}
-                  >
-                    <path
-                      d="M5 6h14M5 12h14M5 18h14"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    ...styles.viewBtn,
-                    ...(isMobile ? styles.viewBtnMobile : null),
-                    ...(gridView === "4" ? styles.viewBtnActive : null),
-                  }}
-                  onClick={() => onChangeGridView("4")}
-                  aria-label="3-up grid view"
-                  title="3-up grid view"
-                >
                   <svg
                     viewBox="0 0 24 24"
                     width="24"
@@ -429,6 +439,7 @@ export default function Navbar({
                   onClick={() => onChangeGridView("5")}
                   aria-label="5-up grid view"
                   title="5-up grid view"
+                  tabIndex={showSearch ? 0 : -1}
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -448,11 +459,80 @@ export default function Navbar({
                     <rect x="15.7" y="15.7" width="4.4" height="4.4" rx="1.2" fill="currentColor" />
                   </svg>
                   </button>
-                </div>
+                  </div>
               </div>
-            ) : null}
-          </div>
-        ) : null}
+              <div
+                style={{
+                  ...styles.navSearchWrap,
+                  ...styles.navSearchWrapDesktop,
+                  ...(showSearch ? null : styles.centerControlsHidden),
+                }}
+                aria-hidden={!showSearch}
+              >
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      minWidth: 0,
+                    }}
+                  >
+                    <input
+                    className="tp-nav-search"
+                    style={styles.navSearchInput}
+                    placeholder="Search here"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    aria-label="Search products"
+                    tabIndex={showSearch ? 0 : -1}
+                  />
+                </div>
+                {search.trim().length > 0 && (
+                  <button
+                    type="button"
+                      style={styles.navClearText}
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                    title="Clear search"
+                    tabIndex={showSearch ? 0 : -1}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {authControl}
+            </>
+          ) : (
+            showSearch ? (
+              <div
+                style={{
+                  ...styles.navSearchWrap,
+                  ...styles.navSearchWrapMobile,
+                }}
+              >
+                <input
+                  className="tp-nav-search"
+                  style={{ ...styles.navSearchInput, ...styles.navSearchMobile }}
+                  placeholder="Search here"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  aria-label="Search products"
+                />
+                {search.trim().length > 0 && (
+                  <button
+                    type="button"
+                    style={styles.navClearText}
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                    title="Clear search"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            ) : null
+          )}
+        </div>
 
         <div style={{ ...styles.navRight, ...(isMobile ? styles.navRightMobile : null) }}>
           {isMobile && showSearch ? (
@@ -613,6 +693,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "6px 10px",
   },
   navLeft: { display: "flex", alignItems: "center", gap: NAV_INLINE_GAP },
+  navLeftDesktop: {
+    position: "relative",
+  },
   navLeftMobile: { gridColumn: "1 / 2", gridRow: "1 / 2", minWidth: 0, gap: 8 },
   navCenter: {
     position: "relative",
@@ -627,10 +710,15 @@ const styles: Record<string, React.CSSProperties> = {
     transform: "translateX(-50%)",
     width: "var(--tp-nav-center-width)",
     justifyContent: "flex-start",
+    gap: 15,
   },
   navCenterMobile: {
     gridColumn: "1 / 2",
     gridRow: "2 / 3",
+  },
+  centerControlsHidden: {
+    visibility: "hidden",
+    pointerEvents: "none",
   },
   navRight: {
     display: "flex",
@@ -748,7 +836,12 @@ const styles: Record<string, React.CSSProperties> = {
   authWrap: {
     position: "relative",
     zIndex: 1250,
-    marginLeft: -10,
+  },
+  authWrapCenterDesktop: {
+    marginLeft: 25,
+  },
+  navLoginDesktopCenter: {
+    padding: 0,
   },
   userBtnEditMode: {
     borderColor: "#66c7ff",
@@ -756,10 +849,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   authMenu: {
     position: "absolute",
-    top: "calc(100% + 6px)",
-    left: 0,
+    top: "calc(100% + 11px)",
+    right: 0,
     zIndex: 1300,
-    width: 180,
+    width: 220,
     padding: 8,
     border: "1px solid var(--tp-nav-fg)",
     borderRadius: 8,
@@ -778,6 +871,28 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontSize: 15,
     lineHeight: "20px",
+  },
+  menuItemRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+  },
+  menuBadge: {
+    minWidth: 22,
+    height: 22,
+    padding: "0 7px",
+    borderRadius: 999,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "var(--tp-accent)",
+    color: "var(--tp-nav-inverse)",
+    fontSize: 12,
+    fontWeight: 900,
+    lineHeight: 1,
+    flexShrink: 0,
   },
   menuDivider: {
     height: 1,
@@ -819,7 +934,7 @@ const styles: Record<string, React.CSSProperties> = {
     height: NAV_CONTROL_H,
     display: "flex",
     alignItems: "center",
-    gap: 20,
+    gap: 10,
     padding: "0 8px",
     borderRadius: 8,
     border: "1px solid transparent",
@@ -828,7 +943,9 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
   },
   navSearchWrapDesktop: {
-    marginRight: 40,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 0,
   },
   navSearchWrapMobile: {
     height: 40,
@@ -836,19 +953,12 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 8px 0 0",
     gap: 8,
   },
-  navSearchIconMobile: {
-    transform: "none",
-  },
-  navSearchIcon: {
-    opacity: 0.9,
-    transform: "translateX(10px) scale(1.3)",
-  },
   navSearchInput: {
     width: "100%",
     height: "100%",
     border: "none",
     fontSize: 15,
-    fontWeight: 600,
+    fontWeight: 400,
     outline: "none",
     background: "transparent",
     backgroundColor: "transparent",

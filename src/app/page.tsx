@@ -12,6 +12,7 @@ import CheckoutDrawer from "@/components/CheckoutDrawer";
 import AuthModal from "@/components/AuthModal";
 import MyDetailsDrawer from "@/components/MyDetailsDrawer";
 import MyOrdersDrawer, { type MyOrderItem } from "@/components/MyOrdersDrawer";
+import MyReviewsDrawer from "@/components/MyReviewsDrawer";
 import CustomersDrawer from "@/components/CustomersDrawer";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 import OrderDrawer from "@/components/OrderDrawer";
@@ -19,6 +20,7 @@ import PurchasesDrawer, { type PurchaseItem } from "@/components/PurchasesDrawer
 import PurchaseDrawer from "@/components/PurchaseDrawer";
 import InventoryDrawer, { type InventoryLine } from "@/components/InventoryDrawer";
 import AnalyticsDrawer from "@/components/AnalyticsDrawer";
+import ReviewsAdminDrawer from "@/components/ReviewsAdminDrawer";
 import ZoneStyleModal, {
   type ZoneStyleDraft,
   type ThemeColorsDraft,
@@ -30,6 +32,7 @@ import LogoEditorModal from "@/components/LogoEditorModal";
 
 import { calculateSteakCredits, formatMoney } from "@/lib/money";
 import { getSessionId, resetSessionId } from "@/lib/session";
+import { getAvailableStock } from "@/lib/stock";
 import {
   fetchProducts,
   fetchProductImages,
@@ -86,6 +89,7 @@ import {
   type CustomerAdminItem,
   type CustomerAdminDetail,
 } from "@/lib/customersApi";
+import { fetchAdminReviews, fetchMyReviewQueue } from "@/lib/reviewsApi";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 
 type Panel = null | "product" | "checkout" | "edit";
@@ -260,6 +264,8 @@ export default function Page() {
   const headerRef = React.useRef<HTMLDivElement | null>(null);
   const navRef = React.useRef<HTMLDivElement | null>(null);
   const listScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const bannerWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const filterScrollAreaRef = React.useRef<HTMLDivElement | null>(null);
 
   const [topOffset, setTopOffset] = React.useState<number>(0);
   const [isMobileViewport, setIsMobileViewport] = React.useState<boolean>(false);
@@ -299,7 +305,9 @@ export default function Page() {
   const [authPhone, setAuthPhone] = React.useState<string>("");
   const [detailsOpen, setDetailsOpen] = React.useState<boolean>(false);
   const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
+  const [myReviewsOpen, setMyReviewsOpen] = React.useState<boolean>(false);
   const [allOrdersOpen, setAllOrdersOpen] = React.useState<boolean>(false);
+  const [allReviewsOpen, setAllReviewsOpen] = React.useState<boolean>(false);
   const [allCustomersOpen, setAllCustomersOpen] = React.useState<boolean>(false);
   const [allPurchasesOpen, setAllPurchasesOpen] = React.useState<boolean>(false);
   const [inventoryOpen, setInventoryOpen] = React.useState<boolean>(false);
@@ -311,6 +319,9 @@ export default function Page() {
   const [allOrders, setAllOrders] = React.useState<MyOrderItem[]>([]);
   const [allCustomers, setAllCustomers] = React.useState<CustomerAdminItem[]>([]);
   const [allPurchases, setAllPurchases] = React.useState<PurchaseItem[]>([]);
+  const [reviewsToSubmitCount, setReviewsToSubmitCount] = React.useState<number>(0);
+  const [reviewsToApproveCount, setReviewsToApproveCount] = React.useState<number>(0);
+  const [notCompletedOrdersCount, setNotCompletedOrdersCount] = React.useState<number>(0);
   const [selectedCustomerId, setSelectedCustomerId] = React.useState<string | null>(null);
   const [selectedCustomerDetail, setSelectedCustomerDetail] = React.useState<CustomerAdminDetail | null>(null);
   const [loadingCustomerDetail, setLoadingCustomerDetail] = React.useState<boolean>(false);
@@ -563,7 +574,19 @@ export default function Page() {
   }, [isMobileViewport]);
 
   React.useEffect(() => {
-    if (!isMobileViewport || panel !== null || mobileFiltersOpen) {
+    if (!isMobileViewport) {
+      setMobileLogoCollapsed(false);
+      return;
+    }
+    if (mobileFiltersOpen) {
+      setMobileLogoCollapsed(false);
+      return;
+    }
+    if (panel === "product") {
+      setMobileLogoCollapsed(true);
+      return;
+    }
+    if (panel !== null) {
       setMobileLogoCollapsed(false);
     }
   }, [isMobileViewport, mobileFiltersOpen, panel]);
@@ -619,20 +642,41 @@ export default function Page() {
       const safeProducts = Array.isArray(p) ? p : [];
       const ids = safeProducts.map((item) => String(item.id));
       const allImages = await fetchProductImages(ids);
-      const inventoryResult = ids.length
-        ? await supabase
-            .from("inventory")
-            .select("product_id,qty_on_hand,qty_allocated,qty_available,reorder_point,target_stock")
-            .in("product_id", ids)
-        : { data: [], error: null as unknown };
-      if (inventoryResult.error) {
-        console.warn("[page] inventory fetch failed:", inventoryResult.error);
+      let inventoryData: Array<Record<string, unknown>> = [];
+      if (ids.length) {
+        const primaryInventoryRead = await supabase
+          .from("inventory")
+          .select("product_id,qty_on_hand,qty_allocated,qty_available,reorder_point,target_stock")
+          .in("product_id", ids);
+
+        let inventoryError = primaryInventoryRead.error;
+        inventoryData =
+          (primaryInventoryRead.data as Array<Record<string, unknown>> | null) ?? [];
+
+        if (inventoryError) {
+          const msg = String(inventoryError.message ?? inventoryError).toLowerCase();
+          const missingReorderSchema =
+            msg.includes("reorder_point") || msg.includes("target_stock") || msg.includes("column");
+          if (missingReorderSchema) {
+            const fallbackInventoryRead = await supabase
+              .from("inventory")
+              .select("product_id,qty_on_hand,qty_allocated,qty_available,low_stock_threshold")
+              .in("product_id", ids);
+            inventoryData =
+              (fallbackInventoryRead.data as Array<Record<string, unknown>> | null) ?? [];
+            inventoryError = fallbackInventoryRead.error;
+          }
+        }
+
+        if (inventoryError) {
+          console.warn("[page] inventory fetch failed:", inventoryError);
+        }
       }
       const inventoryById = new Map<
         string,
         { qty_on_hand: number; qty_allocated: number; qty_available: number; reorder_point: number; target_stock: number }
       >();
-      for (const row of (inventoryResult.data ?? []) as Array<Record<string, unknown>>) {
+      for (const row of inventoryData) {
         const id = String(row.product_id ?? "");
         if (!id) continue;
         inventoryById.set(id, normalizeInventorySnapshot(row));
@@ -1028,6 +1072,72 @@ export default function Page() {
     void fillCustomer();
   }, [authUserId, authEmail, authPhone]);
 
+  React.useEffect(() => {
+    if (!authReady || !authUserId) {
+      setReviewsToSubmitCount(0);
+      setReviewsToApproveCount(0);
+      setNotCompletedOrdersCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMenuCounts = async () => {
+      const tasks: PromiseSettledResult<unknown>[] = await Promise.allSettled([
+        fetchMyReviewQueue({
+          userId: authUserId,
+          email: authEmail || null,
+          phone: authPhone || null,
+        }),
+        isAdmin ? fetchAdminReviews() : Promise.resolve([]),
+        isAdmin ? fetchOrders({ all: true }) : Promise.resolve([]),
+      ]);
+
+      if (cancelled) return;
+
+      const [reviewQueueResult, adminReviewsResult, adminOrdersResult] = tasks;
+
+      if (reviewQueueResult.status === "fulfilled") {
+        const rows = reviewQueueResult.value as Awaited<ReturnType<typeof fetchMyReviewQueue>>;
+        setReviewsToSubmitCount(
+          rows.filter((row) => row.status === null || row.status === "rejected").length
+        );
+      } else {
+        console.error("Failed to load review submit count", reviewQueueResult.reason);
+        setReviewsToSubmitCount(0);
+      }
+
+      if (isAdmin) {
+        if (adminReviewsResult.status === "fulfilled") {
+          const rows = adminReviewsResult.value as Awaited<ReturnType<typeof fetchAdminReviews>>;
+          setReviewsToApproveCount(rows.filter((row) => row.status === "pending").length);
+        } else {
+          console.error("Failed to load review approval count", adminReviewsResult.reason);
+          setReviewsToApproveCount(0);
+        }
+
+        if (adminOrdersResult.status === "fulfilled") {
+          const rows = adminOrdersResult.value as Awaited<ReturnType<typeof fetchOrders>>;
+          setNotCompletedOrdersCount(
+            rows.filter((row) => String(row.status || "").toLowerCase() !== "completed").length
+          );
+        } else {
+          console.error("Failed to load not-completed order count", adminOrdersResult.reason);
+          setNotCompletedOrdersCount(0);
+        }
+      } else {
+        setReviewsToApproveCount(0);
+        setNotCompletedOrdersCount(0);
+      }
+    };
+
+    void loadMenuCounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, authUserId, authEmail, authPhone, isAdmin]);
+
   const openZoneEditor = React.useCallback((zone: ZoneName) => {
     setZoneEditorError("");
     setZoneEditorTarget(zone);
@@ -1405,7 +1515,9 @@ export default function Page() {
     setPanel(null);
     setDetailsOpen(false);
     setOrdersOpen(false);
+    setMyReviewsOpen(false);
     setAllOrdersOpen(false);
+    setAllReviewsOpen(false);
     setAllCustomersOpen(false);
     setAllPurchasesOpen(false);
     setInventoryOpen(false);
@@ -1433,7 +1545,9 @@ export default function Page() {
       panel !== null ||
       detailsOpen ||
       ordersOpen ||
+      myReviewsOpen ||
       allOrdersOpen ||
+      allReviewsOpen ||
       allCustomersOpen ||
       allPurchasesOpen ||
       inventoryOpen ||
@@ -1452,6 +1566,8 @@ export default function Page() {
       inventoryOpen,
       loadingCustomerDetail,
       loadingPurchaseDetail,
+      allReviewsOpen,
+      myReviewsOpen,
       orderDrawerSource,
       ordersOpen,
       panel,
@@ -1647,7 +1763,7 @@ React.useEffect(() => {
 
   const filteredProducts = React.useMemo(() => {
     const q = search.trim();
-    return products.filter((p) => {
+    const next = products.filter((p) => {
       const matchesFilters = filterGroups.every((group) => {
         const selectedValues = selectedFilters[group.key];
         if (!selectedValues.length) return true;
@@ -1656,7 +1772,19 @@ React.useEffect(() => {
       });
       return matchesFilters && matchesProductQuery(p, q);
     });
-  }, [filterGroups, normalizeFilterValue, products, search, selectedFilters]);
+
+    if (isAdmin && adminAllProductsMode) {
+      next.sort((a, b) => {
+        const aName = String(a.long_name ?? a.name ?? "").trim().toLowerCase();
+        const bName = String(b.long_name ?? b.name ?? "").trim().toLowerCase();
+        const nameCmp = aName.localeCompare(bName);
+        if (nameCmp !== 0) return nameCmp;
+        return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+      });
+    }
+
+    return next;
+  }, [adminAllProductsMode, filterGroups, isAdmin, normalizeFilterValue, products, search, selectedFilters]);
 
   const selectedProduct = React.useMemo(() => {
     if (!selectedId) return null;
@@ -1711,6 +1839,7 @@ React.useEffect(() => {
     const enriched = cartItems.map((item) => {
       const product = products.find((p) => String(p.id) === item.productId);
       const hasStockSnapshot = !!product && !loadingProducts;
+      const qtyAvailable = product ? getAvailableStock(product) : 0;
       return {
         ...item,
         country: item.country ?? product?.country_of_origin ?? null,
@@ -1718,13 +1847,11 @@ React.useEffect(() => {
         temperature: product?.temperature ?? null,
         thumbnailUrl: item.thumbnailUrl ?? product?.thumbnail_url ?? null,
         unlimitedStock: Boolean(product?.unlimited_stock),
-        qtyAvailable: hasStockSnapshot
-          ? Math.max(0, Number(product?.qty_available ?? 0))
-          : undefined,
+        qtyAvailable: hasStockSnapshot ? qtyAvailable : undefined,
         outOfStock:
           hasStockSnapshot &&
           !Boolean(product?.unlimited_stock) &&
-          Math.max(0, Number(product?.qty_available ?? 0)) < 1,
+          qtyAvailable < 1,
       };
     });
     return enriched.sort((a, b) => {
@@ -1851,13 +1978,21 @@ React.useEffect(() => {
     }
   }, [blankCustomer, scrollToProducts]);
 
-  const openAllProductsView = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+  const openAllProductsView = React.useCallback((opts?: { skipNavigate?: boolean; preserveScroll?: boolean }) => {
     if (!isAdmin) return;
     closePrimaryDrawers();
     setCartOpen(false);
     setAdminAllProductsMode(true);
-    const el = listScrollRef.current;
-    if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+    setGridView("5");
+    const shouldPreserveScroll = opts?.preserveScroll || preserveNextShopScrollRef.current;
+    preserveNextShopScrollRef.current = false;
+    if (!shouldPreserveScroll) {
+      const el = listScrollRef.current;
+      if (el) el.scrollTo({ top: 0, behavior: "smooth" });
+      restoreNextShopScrollTopRef.current = null;
+    } else if (restoreNextShopScrollTopRef.current == null) {
+      restoreNextShopScrollTopRef.current = listScrollTopRef.current;
+    }
     if (!opts?.skipNavigate && typeof window !== "undefined") {
       window.history.pushState({}, "", "/allproducts");
     }
@@ -1996,8 +2131,10 @@ React.useEffect(() => {
     preserveNextShopScrollRef.current = true;
     restoreNextShopScrollTopRef.current = shopScrollTop;
     closePrimaryDrawers();
-    pushAppRoute("/shop", { state: { shopScrollTop } });
-  }, [closePrimaryDrawers, pushAppRoute]);
+    pushAppRoute(isAdmin && adminAllProductsMode ? "/allproducts" : "/shop", {
+      state: { shopScrollTop },
+    });
+  }, [adminAllProductsMode, closePrimaryDrawers, isAdmin, pushAppRoute]);
 
   const openCheckout = React.useCallback(async (opts?: { skipNavigate?: boolean }) => {
     setCheckoutOpening(true);
@@ -2114,6 +2251,25 @@ React.useEffect(() => {
       pushAppRoute("/profile");
     }
   }, [closePrimaryDrawers, pushAppRoute]);
+
+  const openMyReviewsDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setMyReviewsOpen(true);
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/myreviews");
+    }
+  }, [closePrimaryDrawers, pushAppRoute]);
+
+  const openAllReviewsDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
+    if (!isAdmin) return;
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setAllReviewsOpen(true);
+    if (!opts?.skipNavigate) {
+      pushAppRoute("/reviews");
+    }
+  }, [closePrimaryDrawers, isAdmin, pushAppRoute]);
 
   const loadAndSelectOrder = React.useCallback(
     async (orderId: string, opts?: { retries?: number; delayMs?: number }) => {
@@ -3200,7 +3356,9 @@ React.useEffect(() => {
     if (!cartOpen) return;
     // Defensive guard: while cart is visible, force all-orders context off.
     if (allOrdersOpen) setAllOrdersOpen(false);
+    if (allReviewsOpen) setAllReviewsOpen(false);
     if (allCustomersOpen) setAllCustomersOpen(false);
+    if (myReviewsOpen) setMyReviewsOpen(false);
     setAllPurchasesOpen(false);
     if (allPurchasesOpen) setAllPurchasesOpen(false);
     if (orderDrawerSource === "all") {
@@ -3215,7 +3373,7 @@ React.useEffect(() => {
       setSelectedCustomerDetail(null);
       setSelectedCustomerId(null);
     }
-  }, [allCustomersOpen, allOrdersOpen, allPurchasesOpen, cartOpen, orderDrawerSource, selectedCustomerDetail, selectedPurchaseDetail]);
+  }, [allCustomersOpen, allOrdersOpen, allPurchasesOpen, allReviewsOpen, cartOpen, myReviewsOpen, orderDrawerSource, selectedCustomerDetail, selectedPurchaseDetail]);
 
   const resolveRouteWithoutCart = React.useCallback(() => {
     if (panel === "checkout") return "/checkout";
@@ -3243,9 +3401,11 @@ React.useEffect(() => {
     }
     if (inventoryOpen) return "/inventory";
     if (analyticsOpen) return "/analytics";
+    if (allReviewsOpen) return "/reviews";
     if (allCustomersOpen) return "/customers";
     if (allPurchasesOpen) return "/allpurchases";
     if (allOrdersOpen) return "/allorders";
+    if (myReviewsOpen) return "/myreviews";
     if (ordersOpen) return "/myorders";
     if (detailsOpen) return "/profile";
     if (isAdmin && adminAllProductsMode) return "/allproducts";
@@ -3254,11 +3414,13 @@ React.useEffect(() => {
     adminAllProductsMode,
     analyticsOpen,
     allCustomersOpen,
+    allReviewsOpen,
     allPurchasesOpen,
     allOrdersOpen,
     detailsOpen,
     inventoryOpen,
     isAdmin,
+    myReviewsOpen,
     orderDrawerSource,
     ordersOpen,
     panel,
@@ -3445,6 +3607,11 @@ React.useEffect(() => {
           openMyOrdersDrawer({ skipNavigate: true });
           return;
         }
+        if (path === "/myreviews") {
+          if (!requireAuth({ path, search })) return;
+          openMyReviewsDrawer({ skipNavigate: true });
+          return;
+        }
         if (path === "/profile") {
           if (!requireAuth({ path, search })) return;
           openProfileDrawer({ skipNavigate: true });
@@ -3460,6 +3627,11 @@ React.useEffect(() => {
           openAllCustomersDrawer({ skipNavigate: true });
           return;
         }
+        if (path === "/reviews") {
+          if (!requireAdmin({ path, search })) return;
+          openAllReviewsDrawer({ skipNavigate: true });
+          return;
+        }
         if (path === "/allpurchases") {
           if (!requireAdmin({ path, search })) return;
           openAllPurchasesDrawer({ skipNavigate: true });
@@ -3467,12 +3639,20 @@ React.useEffect(() => {
         }
         if (path === "/allproducts") {
           if (!requireAdmin({ path, search })) return;
-          openAllProductsView({ skipNavigate: true });
+          const stateScrollTop =
+            routeState && typeof routeState.shopScrollTop === "number"
+              ? routeState.shopScrollTop
+              : null;
+          if (stateScrollTop != null) {
+            preserveNextShopScrollRef.current = true;
+            restoreNextShopScrollTopRef.current = stateScrollTop;
+          }
+          openAllProductsView({ skipNavigate: true, preserveScroll: stateScrollTop != null });
           return;
         }
         if (path === "/inventory") {
-          // Inventory is intentionally opened only from the user menu action.
-          openShop({ skipNavigate: true });
+          if (!requireAdmin({ path, search })) return;
+          void openInventoryDrawer({ skipNavigate: true });
           return;
         }
         if (path === "/analytics") {
@@ -3501,9 +3681,12 @@ React.useEffect(() => {
       openCart,
       openCheckout,
       openMyOrdersDrawer,
+      openMyReviewsDrawer,
       openProduct,
       openProfileDrawer,
+      openInventoryDrawer,
       openAnalyticsDrawer,
+      openAllReviewsDrawer,
       openShop,
     ]
   );
@@ -3878,6 +4061,16 @@ React.useEffect(() => {
       return;
     }
 
+    const checkoutFullName =
+      customer.full_name.trim() ||
+      customer.attention_to.trim() ||
+      customer.email.trim() ||
+      customer.phone.trim();
+    if (!checkoutFullName) {
+      alert("Full name is required for checkout.");
+      return;
+    }
+
     const customerData = customer as Record<string, unknown>;
     const customerEmail = String(customerData["email"] ?? "");
     const customerDeliveryDate = String(customerData["delivery_date"] ?? "");
@@ -3890,13 +4083,59 @@ React.useEffect(() => {
       .filter(Boolean)
       .join(" | ");
 
+    const toRpcError = (value: unknown): { message: string; details?: string; hint?: string; code?: string } | null => {
+      if (!value || typeof value !== "object") return value ? { message: String(value) } : null;
+      const row = value as Record<string, unknown>;
+      return {
+        message: String(row["message"] ?? value),
+        details: row["details"] == null ? undefined : String(row["details"]),
+        hint: row["hint"] == null ? undefined : String(row["hint"]),
+        code: row["code"] == null ? undefined : String(row["code"]),
+      };
+    };
+
+    const shouldFallbackToLegacyCheckout = (rpcError: {
+      message: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+    } | null) => {
+      if (!rpcError) return false;
+      const hay = [rpcError.message, rpcError.details, rpcError.hint, rpcError.code]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (hay.includes("no open cart for session_id")) return false;
+
+      return (
+        hay.includes("checkout_cart_v2") ||
+        hay.includes("function") ||
+        hay.includes("schema cache") ||
+        hay.includes("does not exist") ||
+        hay.includes("column") ||
+        hay.includes("record") ||
+        hay.includes("structure of query does not match") ||
+        hay.includes("returned type") ||
+        hay.includes("42703") ||
+        hay.includes("42883")
+      );
+    };
+
+    const formatRpcError = (rpcError: {
+      message: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+    } | null) => [rpcError?.message, rpcError?.details, rpcError?.hint, rpcError?.code].filter(Boolean).join(" | ");
+
     const runCheckoutRpc = async (sid: string) => {
       let data: unknown;
-      let error: { message: string } | null = null;
+      let error: { message: string; details?: string; hint?: string; code?: string } | null = null;
 
       const v2 = await supabase.rpc("checkout_cart_v2", {
         p_session_id: sid,
-        p_full_name: customer.full_name,
+        p_full_name: checkoutFullName,
         p_email: customerEmail,
         p_phone: customer.phone,
         p_address: composeAddress(customer),
@@ -3913,20 +4152,21 @@ React.useEffect(() => {
         p_payment_proof_url: path,
       });
       data = v2.data;
-      error = v2.error ? { message: String(v2.error.message ?? v2.error) } : null;
+      error = toRpcError(v2.error);
 
       // Backward compatibility until SQL v2 is applied.
-      if (error && String(error.message).toLowerCase().includes("checkout_cart_v2")) {
+      if (shouldFallbackToLegacyCheckout(error)) {
+        console.warn("[checkout] checkout_cart_v2 failed, retrying legacy checkout_cart", error);
         const v1 = await supabase.rpc("checkout_cart", {
           p_session_id: sid,
-          p_full_name: customer.full_name,
+          p_full_name: checkoutFullName,
           p_phone: customer.phone,
           p_address: composeAddress(customer),
           p_notes: composedNotes,
           p_payment_proof_url: path,
         });
         data = v1.data;
-        error = v1.error ? { message: String(v1.error.message ?? v1.error) } : null;
+        error = toRpcError(v1.error);
       }
       return { data, error };
     };
@@ -4018,7 +4258,7 @@ React.useEffect(() => {
 
     if (error) {
       console.error("[checkout] checkout RPC failed", error);
-      alert(`Checkout failed: ${error.message}`);
+      alert(`Checkout failed: ${formatRpcError(error)}`);
       return;
     }
 
@@ -4211,9 +4451,29 @@ React.useEffect(() => {
     if (!el) return;
     el.scrollTo({ top: 0, behavior: "auto" });
   }, []);
+  const handoffDesktopFilterWheel = React.useCallback((event: React.WheelEvent<HTMLElement>) => {
+    if (isMobileViewport) return;
+    const listEl = listScrollRef.current;
+    if (!listEl) return;
+
+    const bannerThreshold = bannerWrapRef.current?.offsetHeight ?? 0;
+    const filterEl = filterScrollAreaRef.current;
+    const filterTop = !filterEl || filterEl.scrollTop <= 0;
+    const nextDelta = event.deltaY;
+
+    const shouldScrollMainDown = nextDelta > 0 && listEl.scrollTop < bannerThreshold;
+    const shouldScrollMainUp = nextDelta < 0 && filterTop && listEl.scrollTop > 0;
+
+    if (!shouldScrollMainDown && !shouldScrollMainUp) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    listEl.scrollBy({ top: nextDelta, behavior: "auto" });
+  }, [isMobileViewport]);
   const hideMobileChromeForFullDrawer =
     isMobileViewport &&
-    (panel === "product" || panel === "edit" || panel === "checkout");
+    (panel === "edit" || panel === "checkout");
+  const collapseHeaderForProductDrawer = panel === "product" || (isMobileViewport && mobileLogoCollapsed);
   const mobileFullDrawerTopOffset = hideMobileChromeForFullDrawer ? 0 : topOffset;
   const showPageLoader = !isMainBgReady || loadingProducts;
 
@@ -4260,24 +4520,16 @@ React.useEffect(() => {
         style={{
           ...styles.headerWrap,
           ...headerZoneStyle,
-          ...(isMobileViewport
-            ? {
-                maxHeight: mobileLogoCollapsed ? 0 : mobileLogoHeight,
-                opacity: mobileLogoCollapsed ? 0 : 1,
-              }
-            : null),
+          maxHeight: collapseHeaderForProductDrawer ? 0 : (isMobileViewport ? mobileLogoHeight : 136),
+          opacity: collapseHeaderForProductDrawer ? 0 : 1,
         }}
       >
         <div
           style={{
             ...styles.headerInner,
-            ...(isMobileViewport
-              ? {
-                  minHeight: mobileLogoHeight,
-                  transform: mobileLogoCollapsed ? "translateY(-10px)" : "translateY(0)",
-                  opacity: mobileLogoCollapsed ? 0 : 1,
-                }
-              : null),
+            minHeight: isMobileViewport ? mobileLogoHeight : 136,
+            transform: collapseHeaderForProductDrawer ? "translateY(-10px)" : "translateY(0)",
+            opacity: collapseHeaderForProductDrawer ? 0 : 1,
           }}
         >
           {null}
@@ -4346,16 +4598,21 @@ React.useEffect(() => {
           onOpenAuth={() => setAuthOpen(true)}
           onOpenProfile={openProfileDrawer}
           onOpenOrders={openMyOrdersDrawer}
+          onOpenReviews={openMyReviewsDrawer}
           isAdmin={isAdmin}
           editMode={editMode}
           onToggleEditMode={toggleEditMode}
           onOpenAllOrders={openAllOrdersDrawer}
+          onOpenAdminReviews={openAllReviewsDrawer}
           onOpenAllCustomers={openAllCustomersDrawer}
           onOpenAllPurchases={openAllPurchasesDrawer}
           onOpenAllProducts={openAllProductsView}
           onOpenInventory={openInventoryDrawer}
           onOpenAnalytics={openAnalyticsDrawer}
           onLogout={logout}
+          reviewsToSubmitCount={reviewsToSubmitCount}
+          reviewsToApproveCount={reviewsToApproveCount}
+          notCompletedOrdersCount={notCompletedOrdersCount}
           navTone={navbarTone}
           zoneStyle={navbarDisplayStyle}
           showZoneEditor={false}
@@ -4377,7 +4634,7 @@ React.useEffect(() => {
           }}
         >
           {activeBanner && String(activeBanner.image_url ?? "").trim() ? (
-            <div style={styles.bannerWrap}>
+            <div ref={bannerWrapRef} style={styles.bannerWrap}>
               <div
                 style={
                   activeBanners.length > 1 ? styles.bannerRail : styles.bannerRailSingle
@@ -4449,7 +4706,7 @@ React.useEffect(() => {
                   ...styles.filterPanel,
                   maxHeight: `calc(var(--tp-app-height, 100vh) - ${topOffset + 30}px)`,
                 }}
-                onWheel={(e) => e.stopPropagation()}
+                onWheel={handoffDesktopFilterWheel}
                 onTouchMove={(e) => e.stopPropagation()}
               >
                 {isAdmin && adminAllProductsMode ? (
@@ -4478,7 +4735,7 @@ React.useEffect(() => {
                     </button>
                   ) : null}
                 </div>
-                <div style={styles.filterScrollArea}>
+                <div ref={filterScrollAreaRef} style={styles.filterScrollArea}>
                   {filterGroups.map((group, index) => (
                     <div
                       key={group.key}
@@ -4683,6 +4940,7 @@ React.useEffect(() => {
         cartQtyById={cart}
         relatedProducts={sameCategoryProducts}
         popularProducts={popularProducts}
+        backgroundStyle={mainZoneStyle}
         onBack={backToList}
         canEdit={isAdmin && editMode}
         onEdit={openEditProduct}
@@ -4818,6 +5076,16 @@ React.useEffect(() => {
         }}
       />
 
+      <MyReviewsDrawer
+        isOpen={myReviewsOpen}
+        topOffset={topOffset}
+        userId={authUserId}
+        email={authEmail}
+        phone={authPhone}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => goBackDrawer("/shop")}
+      />
+
       <MyOrdersDrawer
         isOpen={allOrdersOpen}
         topOffset={topOffset}
@@ -4844,6 +5112,16 @@ React.useEffect(() => {
           setSelectedOrderDetail(null);
           setAllOrdersOpen(false);
           setAllPurchasesOpen(false);
+          goBackDrawer("/shop");
+        }}
+      />
+
+      <ReviewsAdminDrawer
+        isOpen={allReviewsOpen}
+        topOffset={topOffset}
+        backgroundStyle={mainZoneStyle}
+        onClose={() => {
+          setAllReviewsOpen(false);
           goBackDrawer("/shop");
         }}
       />

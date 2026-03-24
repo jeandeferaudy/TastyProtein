@@ -3,6 +3,7 @@
 
 import * as React from "react";
 import type { DbProduct } from "@/lib/products";
+import { getAvailableStock } from "@/lib/stock";
 import { AppButton, GearIcon, QtyIcon } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 
@@ -104,7 +105,7 @@ export default function ProductCard({
     ? { ...styles.top, ...styles.topCompact }
     : styles.top;
   const status = (product.status ?? "Active").toLowerCase();
-  const qtyAvailable = Math.max(0, Number(product.qty_available ?? 0));
+  const qtyAvailable = getAvailableStock(product);
   const isStockLimited = !Boolean(product.unlimited_stock);
   const isHardOos = isStockLimited && qtyAvailable < 1;
   const showStockWarning = isStockLimited && !isHardOos && qty > qtyAvailable;

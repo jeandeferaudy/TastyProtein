@@ -6,7 +6,11 @@ import type { Order } from "@/types/order";
 import type { CheckoutSubmitPayload, CustomerDraft } from "@/types/checkout";
 import { AppButton, RemoveIcon, TOPBAR_FONT_SIZE, UI } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
-import { fallbackDeliveryRule, type DeliveryRule } from "@/lib/deliveryPricing";
+import {
+  fallbackDeliveryRule,
+  getDeliveryPricingMatrixRows,
+  type DeliveryRule,
+} from "@/lib/deliveryPricing";
 import { calculateSteakCredits, formatCurrencyPHP } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 
@@ -136,6 +140,7 @@ export default function CheckoutDrawer({
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
   const [useProfileAddress, setUseProfileAddress] = React.useState(false);
   const [deliveryRules, setDeliveryRules] = React.useState<DeliveryRule[]>([]);
+  const [deliveryPricingOpen, setDeliveryPricingOpen] = React.useState(false);
   const [proofPreviewOpen, setProofPreviewOpen] = React.useState(false);
   const [proofPreviewUrl, setProofPreviewUrl] = React.useState<string | null>(null);
   const [copyNoticeVisible, setCopyNoticeVisible] = React.useState(false);
@@ -147,6 +152,7 @@ export default function CheckoutDrawer({
   const timePickerListRef = React.useRef<HTMLDivElement | null>(null);
   const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const rightStepScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const deliveryPricingRows = React.useMemo(() => getDeliveryPricingMatrixRows(), []);
 
   React.useEffect(() => {
     const onResize = () => {
@@ -187,6 +193,15 @@ export default function CheckoutDrawer({
       if (proofPreviewUrl) URL.revokeObjectURL(proofPreviewUrl);
     };
   }, [proofPreviewUrl]);
+
+  React.useEffect(() => {
+    if (!deliveryPricingOpen) return;
+    const onEsc = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setDeliveryPricingOpen(false);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [deliveryPricingOpen]);
 
   React.useEffect(() => {
     if (!copyNoticeVisible) return;
@@ -424,6 +439,11 @@ export default function CheckoutDrawer({
       setStepAttempted({ 1: false, 2: false, 3: false, 4: false });
     }
   }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!customer.add_refer_bag) return;
+    setCustomer({ ...customer, add_refer_bag: false });
+  }, [customer, setCustomer]);
 
   const missingCustomer: string[] = [];
   if (!hasRecipientName) missingCustomer.push("full name");
@@ -832,6 +852,21 @@ export default function CheckoutDrawer({
     </div>
   );
 
+  const freeDeliveryHintNode =
+    postalSupported && deliveryFee > 0 ? (
+      <div style={{ ...styles.deliveryHint, ...styles.summaryIndentedBlock }}>
+        The minimum order for your postal code is ₱ {formatMoney(freeDeliveryTarget)}. Order ₱{" "}
+        {formatMoney(Math.max(freeDeliveryTarget - computedTotal, 0))} more to get FREE delivery.{" "}
+        <button
+          type="button"
+          style={styles.deliveryCostsLink}
+          onClick={() => setDeliveryPricingOpen(true)}
+        >
+          Click here to see our delivery costs.
+        </button>
+      </div>
+    ) : null;
+
   return (
     <>
       {/* Backdrop (ONLY below the white bar) */}
@@ -975,7 +1010,7 @@ export default function CheckoutDrawer({
                     </div>
                   </div>
 
-                  {checkoutStep > 2 ? (
+                  {checkoutStep > 1 && hasRecipientPostalCode ? (
                     <div
                       style={{
                         ...styles.summaryTotalRow,
@@ -996,7 +1031,7 @@ export default function CheckoutDrawer({
                     </div>
                   ) : null}
 
-                  {checkoutStep > 2 ? (
+                  {checkoutStep > 1 && hasRecipientPostalCode ? (
                     <div
                       style={{
                         ...styles.summaryTotalRow,
@@ -1013,12 +1048,12 @@ export default function CheckoutDrawer({
                           ...(referBagFee > 0 ? styles.summaryAccentText : null),
                         }}
                       >
-                        {referBagFee > 0 ? "$200" : <span style={styles.freeTag}>FREE</span>}
+                        {referBagFee > 0 ? "₱200" : <span style={styles.freeTag}>FREE</span>}
                       </div>
                     </div>
                   ) : null}
 
-                  <div style={styles.summaryShortDivider} />
+                    <div style={styles.summaryShortDivider} />
                   <div
                     style={{
                       ...styles.summaryTotalRowFinal,
@@ -1036,13 +1071,7 @@ export default function CheckoutDrawer({
                     </div>
                   ) : null}
 
-                  {checkoutStep === 3 && postalSupported && deliveryFee > 0 ? (
-                    <div style={{ ...styles.deliveryHint, ...styles.summaryIndentedBlock }}>
-                      The minimum order for your postal code is ₱ {formatMoney(freeDeliveryTarget)}.
-                      {" "}Order ₱ {formatMoney(Math.max(freeDeliveryTarget - computedTotal, 0))} more
-                      {" "}to get FREE delivery.
-                    </div>
-                  ) : null}
+                  {checkoutStep > 1 ? freeDeliveryHintNode : null}
                   {checkoutStep > 1 && !postalSupported && customer.postal_code.trim().length > 0 ? (
                     <div style={styles.deliveryHintWarn}>
                       Postal code not yet covered for delivery.
@@ -1226,6 +1255,14 @@ export default function CheckoutDrawer({
                         ))
                       )}
                     </div>
+                    {freeDeliveryHintNode ? (
+                      <div style={{ marginTop: 12, marginBottom: 4 }}>{freeDeliveryHintNode}</div>
+                    ) : null}
+                    {!postalSupported && customer.postal_code.trim().length > 0 ? (
+                      <div style={{ ...styles.deliveryHintWarn, marginTop: 12, marginBottom: 4 }}>
+                        Postal code not yet covered for delivery.
+                      </div>
+                    ) : null}
                     <AppButton
                       style={{
                         ...styles.sendBtn,
@@ -1461,6 +1498,17 @@ export default function CheckoutDrawer({
                     />
                   </div>
                 </div>
+                {!postalSupported && customer.postal_code.trim().length > 0 ? (
+                  <div
+                    style={{
+                      ...styles.deliveryHintWarn,
+                      marginTop: 12,
+                      ...(isNarrow ? null : styles.customerStepInputAlignedNotice),
+                    }}
+                  >
+                    Postal code not yet covered for delivery.
+                  </div>
+                ) : null}
 
 	                <div style={{ ...fieldRowStyle, alignItems: "flex-start" }}>
 	                  <label style={{ ...fieldLabelStyle, ...styles.notesLabel }}>
@@ -1482,23 +1530,37 @@ export default function CheckoutDrawer({
 
 	                {!isLoggedIn && setCreateAccountFromDetails ? (
                   <div style={styles.steakCreditsBox}>
-                    <div style={styles.steakCreditsBoxTitle}>Earn Steak Credits</div>
-                    <label style={{ ...styles.optInRow, marginTop: 6, alignItems: "flex-start" }}>
+                    <label style={styles.steakCreditsBoxRow}>
                       <input
                         type="checkbox"
-                        style={{ ...styles.checkoutCheckbox, marginTop: 3 }}
+                        style={styles.steakCreditsBoxCheckbox}
                         checked={createAccountFromDetails}
                         onChange={(e) => setCreateAccountFromDetails(e.target.checked)}
                       />
-                      <span style={styles.steakCreditsBoxBody}>
+                      <span style={styles.steakCreditsBoxTextCol}>
+                        <span style={styles.steakCreditsBoxTitle}>Earn Steak Credits</span>
+                        <span style={styles.steakCreditsBoxBody}>
                         Create an account and instantly earn 5% of your spending in Steak Credits for your next order.
+                        </span>
+                        <span style={styles.steakCreditsBoxEstimate}>
+                          You will earn {formatCurrencyPHP(steakCreditsEstimate)} in Steak Credits on this order.
+                        </span>
                       </span>
                     </label>
-                    <div style={styles.steakCreditsBoxEstimate}>
-                      You will earn {formatCurrencyPHP(steakCreditsEstimate)} in Steak Credits on this order.
-                    </div>
                     {createAccountFromDetails ? (
                       <div style={styles.accountFieldsGrid}>
+                        <div style={styles.accountIntro}>
+                          Please confirm your email and password for us to create your account. We
+                          will send you a confirmation email to activate your account.
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="email"
+                          value={customer.email}
+                          onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
+                          placeholder="Confirm email"
+                          autoComplete="email"
+                        />
                         <input
                           style={styles.input}
                           type="password"
@@ -1763,14 +1825,13 @@ export default function CheckoutDrawer({
 		                        <input
 		                          type="checkbox"
                               style={styles.checkoutCheckbox}
-		                          checked={customer.add_refer_bag}
-		                          onChange={(e) =>
-		                            setCustomer({ ...customer, add_refer_bag: e.target.checked })
-		                          }
+		                          checked={false}
+		                          disabled
 		                        />
 		                        <span>
 		                          Thermal bag to keep item perfectly frozen/fresh{" "}
-		                          <strong style={styles.freeTag}>$200</strong>
+		                          <strong style={styles.freeTag}>₱200</strong>{" "}
+                              <strong style={styles.freeTag}>(SOLD OUT)</strong>
 		                        </span>
 		                      </label>
 		                    </div>
@@ -1862,6 +1923,82 @@ export default function CheckoutDrawer({
           )}
         </div>
       </aside>
+      {deliveryPricingOpen ? (
+        <div
+          style={styles.deliveryPricingBackdrop}
+          onClick={() => setDeliveryPricingOpen(false)}
+          role="presentation"
+        >
+          <div
+            style={styles.deliveryPricingModal}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delivery table"
+          >
+            <div style={styles.deliveryPricingHeader}>
+              <div style={styles.deliveryPricingTitle}>DELIVERY FEES</div>
+              <AppButton
+                type="button"
+                variant="ghost"
+                style={styles.deliveryPricingCloseBtn}
+                onClick={() => setDeliveryPricingOpen(false)}
+              >
+                CLOSE
+              </AppButton>
+            </div>
+            <div style={styles.deliveryPricingSubtitle}>
+              Free delivery unlocks automatically once your subtotal reaches the minimum for your area.
+            </div>
+
+            {isMobileViewport ? (
+              <div style={styles.deliveryPricingCardList}>
+                {deliveryPricingRows.map((row) => (
+                  <div key={`${row.postalCodes}-${row.area}`} style={styles.deliveryPricingCard}>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Area</span>
+                      <span style={styles.deliveryPricingCardValue}>{row.area}</span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Free from</span>
+                      <span style={styles.deliveryPricingCardValue}>
+                        ₱ {formatMoney(row.freeFromPhp)}
+                      </span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Fee below min</span>
+                      <span style={styles.deliveryPricingCardValue}>
+                        ₱ {formatMoney(row.feeBelowMinPhp)}
+                      </span>
+                    </div>
+                    <div style={styles.deliveryPricingCardRow}>
+                      <span style={styles.deliveryPricingCardLabel}>Postcode(s)</span>
+                      <span style={styles.deliveryPricingCardValue}>{row.postalCodes}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={styles.deliveryPricingTableWrap}>
+                <div style={styles.deliveryPricingTableHeaderRow}>
+                  <div style={styles.deliveryPricingAreaCol}>AREA</div>
+                  <div>FREE DELIVERY FROM</div>
+                  <div>FEE BELOW MIN</div>
+                  <div>POSTCODE(S)</div>
+                </div>
+                {deliveryPricingRows.map((row) => (
+                  <div key={`${row.postalCodes}-${row.area}`} style={styles.deliveryPricingTableRow}>
+                    <div style={styles.deliveryPricingAreaCol}>{row.area}</div>
+                    <div>₱ {formatMoney(row.freeFromPhp)}</div>
+                    <div>₱ {formatMoney(row.feeBelowMinPhp)}</div>
+                    <div>{row.postalCodes}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -2148,6 +2285,9 @@ const styles: Record<string, React.CSSProperties> = {
   fieldRowMobile: {
     display: "grid",
   },
+  customerStepInputAlignedNotice: {
+    marginLeft: 162,
+  },
   firstFieldRow: {
     marginTop: 0,
   },
@@ -2287,6 +2427,23 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.3,
     color: "var(--tp-text-color)",
   },
+  steakCreditsBoxRow: {
+    display: "grid",
+    gridTemplateColumns: "20px minmax(0, 1fr)",
+    columnGap: 12,
+    alignItems: "start",
+  },
+  steakCreditsBoxCheckbox: {
+    ...({
+      transform: "scale(1.2)",
+      transformOrigin: "top left",
+      marginTop: 2,
+    } as React.CSSProperties),
+  },
+  steakCreditsBoxTextCol: {
+    display: "grid",
+    gap: 6,
+  },
   steakCreditsBoxBody: {
     display: "block",
     fontSize: 15,
@@ -2294,7 +2451,6 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.92,
   },
   steakCreditsBoxEstimate: {
-    marginTop: 10,
     fontSize: 14,
     lineHeight: 1.4,
     color: "var(--tp-accent)",
@@ -2304,6 +2460,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 8,
     marginTop: 10,
+  },
+  accountIntro: {
+    fontSize: 13,
+    lineHeight: 1.45,
+    opacity: 0.85,
+    marginBottom: 2,
   },
   accountHint: {
     fontSize: 13,
@@ -2692,6 +2854,21 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 15,
     color: "#ffb14a",
   },
+  deliveryCostsLinkWrap: {
+    marginTop: 8,
+  },
+  deliveryCostsLink: {
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-accent)",
+    padding: 0,
+    fontSize: 14,
+    lineHeight: 1.45,
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
+    cursor: "pointer",
+    display: "inline",
+  },
   stockWarnBox: {
     marginTop: 8,
     borderRadius: 10,
@@ -2970,6 +3147,113 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid var(--tp-border-color-soft)",
     borderRadius: 8,
     background: "transparent",
+  },
+  deliveryPricingBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.66)",
+    zIndex: 1800,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px",
+  },
+  deliveryPricingModal: {
+    width: "min(1180px, 100%)",
+    maxHeight: "calc(100vh - 48px)",
+    overflowY: "auto",
+    background: "rgba(0,0,0,0.95)",
+    border: "1px solid rgba(255,255,255,0.9)",
+    borderRadius: 22,
+    padding: "28px 30px 30px",
+    color: "var(--tp-text-color)",
+    boxShadow: "0 28px 80px rgba(0,0,0,0.5)",
+  },
+  deliveryPricingHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 14,
+  },
+  deliveryPricingTitle: {
+    fontSize: 24,
+    fontWeight: 900,
+    letterSpacing: 0.6,
+  },
+  deliveryPricingCloseBtn: {
+    borderRadius: 16,
+    padding: "14px 28px",
+    minWidth: 134,
+    border: "1px solid rgba(255,255,255,0.9)",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    fontSize: TOPBAR_FONT_SIZE,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    cursor: "pointer",
+  },
+  deliveryPricingSubtitle: {
+    fontSize: 16,
+    lineHeight: 1.45,
+    opacity: 0.82,
+    marginBottom: 20,
+  },
+  deliveryPricingTableWrap: {
+    border: "1px solid rgba(255,255,255,0.28)",
+    borderRadius: 20,
+    overflow: "hidden",
+  },
+  deliveryPricingTableHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "2.1fr 1.4fr 1.4fr 1.7fr",
+    gap: 0,
+    alignItems: "center",
+    padding: "18px 22px",
+    background: "rgba(255,255,255,0.08)",
+    fontSize: 13,
+    fontWeight: 900,
+    letterSpacing: 0.4,
+  },
+  deliveryPricingTableRow: {
+    display: "grid",
+    gridTemplateColumns: "2.1fr 1.4fr 1.4fr 1.7fr",
+    gap: 0,
+    alignItems: "start",
+    padding: "18px 22px",
+    borderTop: "1px solid rgba(255,255,255,0.18)",
+    fontSize: 15,
+    lineHeight: 1.45,
+  },
+  deliveryPricingAreaCol: {
+    paddingRight: 18,
+  },
+  deliveryPricingCardList: {
+    display: "grid",
+    gap: 12,
+  },
+  deliveryPricingCard: {
+    border: "1px solid rgba(255,255,255,0.25)",
+    borderRadius: 16,
+    padding: "14px 16px",
+    background: "rgba(255,255,255,0.03)",
+    display: "grid",
+    gap: 10,
+  },
+  deliveryPricingCardRow: {
+    display: "grid",
+    gap: 4,
+  },
+  deliveryPricingCardLabel: {
+    fontSize: 12,
+    letterSpacing: 0.4,
+    fontWeight: 800,
+    opacity: 0.72,
+    textTransform: "uppercase",
+  },
+  deliveryPricingCardValue: {
+    fontSize: 15,
+    lineHeight: 1.45,
   },
 
   successWrap: {

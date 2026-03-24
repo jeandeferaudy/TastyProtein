@@ -5,9 +5,15 @@ import * as React from "react";
 import type { Product } from "@/types/product";
 import type { ProductImage } from "@/lib/products";
 import { getDeliveryPricingMatrixRows } from "@/lib/deliveryPricing";
+import ReviewStars from "@/components/ReviewStars";
 import { AppButton, GearIcon, QtyIcon, TOPBAR_FONT_SIZE } from "@/components/ui";
 import LogoPlaceholder from "@/components/LogoPlaceholder";
 import ProductCard from "@/components/ProductCard";
+import {
+  fetchApprovedProductReviews,
+  summarizeProductReviews,
+  type ProductReview,
+} from "@/lib/reviewsApi";
 const BACK_BTN_W = 68;
 const TITLE_GAP = 40;
 
@@ -107,10 +113,27 @@ export default function ProductDrawer({
   }, [orderedImages]);
   const [activeImageUrl, setActiveImageUrl] = React.useState<string>("");
   const deliveryPricingRows = React.useMemo(() => getDeliveryPricingMatrixRows(), []);
+  const [approvedReviews, setApprovedReviews] = React.useState<ProductReview[]>([]);
+  const [reviewsLoading, setReviewsLoading] = React.useState(false);
+  const [reviewSort, setReviewSort] = React.useState<"recent" | "highest" | "lowest">("recent");
+  const [reviewStarsFilter, setReviewStarsFilter] = React.useState<number>(0);
+  const reviewsSectionRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     setActiveImageUrl(defaultMainImage);
   }, [defaultMainImage, productId]);
+
+  React.useEffect(() => {
+    if (!isOpen || !productId) return;
+    setReviewsLoading(true);
+    fetchApprovedProductReviews(productId)
+      .then((rows) => setApprovedReviews(rows))
+      .catch((error) => {
+        console.error("Failed to load product reviews", error);
+        setApprovedReviews([]);
+      })
+      .finally(() => setReviewsLoading(false));
+  }, [isOpen, productId]);
 
   React.useEffect(() => {
     const onResize = () => setIsMobileViewport(window.innerWidth < 768);
@@ -182,6 +205,23 @@ export default function ProductDrawer({
   );
   const productTitle = product?.long_name || product?.name || "Product";
   const lovePoints = React.useMemo(() => splitLovePoints(product?.love_points), [product?.love_points]);
+  const reviewSummary = React.useMemo(() => summarizeProductReviews(approvedReviews), [approvedReviews]);
+  const visibleReviews = React.useMemo(() => {
+    const filtered =
+      reviewStarsFilter > 0
+        ? approvedReviews.filter((review) => review.rating === reviewStarsFilter)
+        : approvedReviews.slice();
+    filtered.sort((a, b) => {
+      if (reviewSort === "highest") {
+        return b.rating - a.rating || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+      if (reviewSort === "lowest") {
+        return a.rating - b.rating || new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    return filtered;
+  }, [approvedReviews, reviewSort, reviewStarsFilter]);
   const activeImageIndex = React.useMemo(() => {
     if (!orderedImages.length) return -1;
     const idx = orderedImages.findIndex((img) => img.url === activeImageUrl);
@@ -288,6 +328,36 @@ export default function ProductDrawer({
         <div style={styles.drawerName}>{productTitle}</div>
       ) : null}
 
+      <div
+        style={{
+          ...styles.reviewSummaryRow,
+          ...(isMobileViewport ? styles.reviewSummaryRowMobile : null),
+        }}
+      >
+        <div
+          style={{
+            ...styles.reviewSummaryMain,
+            ...(isMobileViewport ? styles.reviewSummaryMainMobile : null),
+          }}
+        >
+          <ReviewStars rating={reviewSummary.averageRating} size={24} />
+          <div style={styles.reviewSummaryText}>
+            {reviewSummary.totalReviews > 0
+              ? `${Math.round(reviewSummary.averageRating)} / 5`
+              : "No reviews yet"}
+          </div>
+          {reviewSummary.totalReviews > 0 ? (
+            <button
+              type="button"
+              style={styles.reviewLinkBtn}
+              onClick={() => reviewsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              See {reviewSummary.totalReviews} review{reviewSummary.totalReviews === 1 ? "" : "s"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
       {product.callout_text ? (
         <div style={styles.detailBlockTight}>
           <div style={styles.drawerCallout}>{product.callout_text}</div>
@@ -318,7 +388,7 @@ export default function ProductDrawer({
       </div>
 
       {lovePoints.length > 0 ? (
-        <div style={styles.detailBlock}>
+        <div style={{ ...styles.detailBlock, marginTop: 20 }}>
           <div
             style={
               isMobileViewport ? styles.loveRowMobile : styles.loveRow
@@ -416,6 +486,113 @@ export default function ProductDrawer({
           ) : null}
         </div>
       ) : null}
+
+      <div ref={reviewsSectionRef} style={styles.detailBlockWide}>
+        <div style={styles.reviewsHeaderRow}>
+          <div>
+            <div style={styles.detailLabel}>Reviews</div>
+          </div>
+          {reviewSummary.totalReviews > 0 ? (
+            <div style={styles.reviewsControls}>
+              <select
+                value={reviewSort}
+                onChange={(event) => setReviewSort(event.target.value as "recent" | "highest" | "lowest")}
+                style={styles.reviewSelect}
+              >
+                <option value="recent">Most recent</option>
+                <option value="highest">Highest rated</option>
+                <option value="lowest">Lowest rated</option>
+              </select>
+              <select
+                value={String(reviewStarsFilter)}
+                onChange={(event) => setReviewStarsFilter(Number(event.target.value) || 0)}
+                style={styles.reviewSelect}
+              >
+                <option value="0">All stars</option>
+                <option value="5">5 stars</option>
+                <option value="4">4 stars</option>
+                <option value="3">3 stars</option>
+                <option value="2">2 stars</option>
+                <option value="1">1 star</option>
+              </select>
+            </div>
+          ) : null}
+        </div>
+        {reviewSummary.totalReviews > 0 ? (
+          <div style={styles.reviewStatsRow}>
+            <div style={styles.reviewStatsCard}>
+              <div style={styles.reviewStatsBig}>{reviewSummary.averageRating.toFixed(1)}</div>
+              <ReviewStars rating={reviewSummary.averageRating} size={18} />
+            </div>
+            <div style={styles.reviewBreakdown}>
+              {[5, 4, 3, 2, 1].map((star) => {
+                const count = reviewSummary.countsByRating[star] ?? 0;
+                const width =
+                  reviewSummary.totalReviews > 0
+                    ? `${(count / reviewSummary.totalReviews) * 100}%`
+                    : "0%";
+                return (
+                  <div key={star} style={styles.reviewBreakdownRow}>
+                    <span>{star}★</span>
+                    <div style={styles.reviewBreakdownTrack}>
+                      <div style={{ ...styles.reviewBreakdownFill, width }} />
+                    </div>
+                    <span>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        {reviewSummary.totalReviews > 0 ? (
+          <div style={styles.reviewsScroll}>
+            {visibleReviews.length > 0 ? (
+              visibleReviews.map((review) => (
+                <article key={review.id} style={styles.reviewCard}>
+                  <div style={styles.reviewCardTop}>
+                    <div>
+                      <div style={styles.reviewAuthor}>{review.display_name}</div>
+                      <div style={styles.reviewMeta}>
+                        {new Date(review.created_at).toLocaleDateString("en-PH", {
+                          year: "numeric",
+                          month: "short",
+                          day: "2-digit",
+                        })}
+                      </div>
+                    </div>
+                    <div style={styles.reviewTopRating}>
+                      <ReviewStars rating={review.rating} size={15} />
+                      <span>{review.rating}/5</span>
+                    </div>
+                  </div>
+                  <div style={styles.reviewSubRatings}>
+                    <span style={styles.reviewSubRatingItem}>
+                      <span>Tenderness</span>
+                      <ReviewStars rating={review.tenderness_rating} size={12} />
+                      <span>{review.tenderness_rating}/5</span>
+                    </span>
+                    <span style={styles.reviewSubRatingItem}>
+                      <span>Taste</span>
+                      <ReviewStars rating={review.taste_rating} size={12} />
+                      <span>{review.taste_rating}/5</span>
+                    </span>
+                    <span style={styles.reviewSubRatingItem}>
+                      <span>Delivery</span>
+                      <ReviewStars rating={review.delivery_rating} size={12} />
+                      <span>{review.delivery_rating}/5</span>
+                    </span>
+                  </div>
+                  <div style={styles.reviewText}>
+                    {review.review_text || "Customer left a rating without extra comments."}
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div style={styles.drawerDescMuted}>No reviews match the selected star filter.</div>
+            )}
+          </div>
+        ) : null}
+      </div>
 
       <div style={styles.detailBlockWide}>
         <div
@@ -726,10 +903,10 @@ export default function ProductDrawer({
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
-            aria-label="Delivery pricing matrix"
+            aria-label="Delivery table"
           >
             <div style={styles.deliveryPricingHeader}>
-              <div style={styles.deliveryPricingTitle}>DELIVERY PRICING MATRIX</div>
+              <div style={styles.deliveryPricingTitle}>DELIVERY FEES</div>
               <AppButton
                 type="button"
                 variant="ghost"
@@ -740,7 +917,7 @@ export default function ProductDrawer({
               </AppButton>
             </div>
             <div style={styles.deliveryPricingSubtitle}>
-              Free delivery is automatically unlocked once your subtotal reaches the minimum for your area.
+              Free delivery unlocks automatically once your subtotal reaches the minimum for your area.
             </div>
 
             {isMobileViewport ? (
@@ -919,7 +1096,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   drawerGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+    gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 0.9fr)",
     gridTemplateRows: "auto auto",
     gap: 32,
     alignItems: "start",
@@ -1153,6 +1330,39 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 20,
     opacity: 0.88,
   },
+  reviewSummaryRow: {
+    display: "flex",
+    alignItems: "center",
+    marginTop: -2,
+    marginBottom: 22,
+  },
+  reviewSummaryRowMobile: {
+    justifyContent: "center",
+  },
+  reviewSummaryMain: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  reviewSummaryMainMobile: {
+    justifyContent: "center",
+  },
+  reviewSummaryText: {
+    fontSize: 14,
+    fontWeight: 800,
+    opacity: 0.88,
+  },
+  reviewLinkBtn: {
+    border: "none",
+    background: "transparent",
+    color: "#d9ad4d",
+    cursor: "pointer",
+    padding: 0,
+    font: "inherit",
+    fontSize: 14,
+    fontWeight: 800,
+  },
   drawerDescMuted: {
     color: "var(--tp-text-color)",
     opacity: 0.58,
@@ -1160,6 +1370,133 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 16,
     borderTop: "none",
     paddingTop: 0,
+  },
+  reviewsHeaderRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  reviewsHeaderMeta: {
+    marginTop: 6,
+    opacity: 0.7,
+    fontSize: 14,
+  },
+  reviewsControls: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  reviewSelect: {
+    minHeight: 38,
+    padding: "0 10px",
+    border: "1px solid var(--tp-border-color)",
+    borderRadius: 999,
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    font: "inherit",
+  },
+  reviewStatsRow: {
+    display: "grid",
+    gridTemplateColumns: "130px minmax(0,1fr)",
+    gap: 16,
+    marginTop: 14,
+    alignItems: "start",
+  },
+  reviewStatsCard: {
+    border: "1px solid rgba(255,255,255,0.35)",
+    borderRadius: 14,
+    background: "var(--tp-control-bg-soft)",
+    padding: 14,
+    display: "grid",
+    gap: 8,
+    justifyItems: "start",
+  },
+  reviewStatsBig: {
+    fontSize: 34,
+    fontWeight: 900,
+    lineHeight: 1,
+  },
+  reviewBreakdown: {
+    display: "grid",
+    gap: 8,
+    alignSelf: "stretch",
+  },
+  reviewBreakdownRow: {
+    display: "grid",
+    gridTemplateColumns: "34px minmax(0,1fr) 28px",
+    gap: 10,
+    alignItems: "center",
+    fontSize: 13,
+    opacity: 0.88,
+  },
+  reviewBreakdownTrack: {
+    height: 8,
+    background: "rgba(255,255,255,0.12)",
+    borderRadius: 999,
+    position: "relative",
+    overflow: "hidden",
+  },
+  reviewBreakdownFill: {
+    position: "absolute",
+    inset: 0,
+    right: "auto",
+    background: "#d9ad4d",
+  },
+  reviewsScroll: {
+    display: "grid",
+    gap: 12,
+    marginTop: 16,
+    maxHeight: 420,
+    overflowY: "auto",
+    paddingRight: 4,
+  },
+  reviewCard: {
+    border: "1px solid rgba(255,255,255,0.35)",
+    borderRadius: 14,
+    background: "var(--tp-control-bg-soft)",
+    padding: 14,
+    display: "grid",
+    gap: 10,
+  },
+  reviewCardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  reviewAuthor: {
+    fontSize: 16,
+    fontWeight: 900,
+  },
+  reviewMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    opacity: 0.65,
+  },
+  reviewTopRating: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 800,
+  },
+  reviewSubRatings: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 12,
+    fontSize: 13,
+    opacity: 0.8,
+  },
+  reviewSubRatingItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  reviewText: {
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.55,
   },
   drawerBodyWide: {
     width: "100%",
@@ -1180,7 +1517,7 @@ const styles: Record<string, React.CSSProperties> = {
   loveRowMobile: {
     display: "grid",
     gridTemplateColumns: "1fr",
-    rowGap: 6,
+    rowGap: 11,
   },
   loveItem: {
     display: "block",
