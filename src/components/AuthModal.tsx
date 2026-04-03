@@ -87,6 +87,15 @@ export default function AuthModal({ isOpen, onClose }: Props) {
     window.turnstile.reset(widgetId);
   }, []);
 
+  const removeCaptchaWidget = React.useCallback(() => {
+    const widgetId = turnstileWidgetIdRef.current;
+    if (widgetId && window.turnstile) {
+      window.turnstile.remove(widgetId);
+    }
+    turnstileWidgetIdRef.current = null;
+    setCaptchaToken("");
+  }, []);
+
   React.useEffect(() => {
     if (!isOpen || !shouldUseCaptcha) return;
     if (window.turnstile) {
@@ -118,14 +127,14 @@ export default function AuthModal({ isOpen, onClose }: Props) {
 
   React.useEffect(() => {
     if (isOpen || !shouldUseCaptcha) return;
-    setCaptchaToken("");
     setErr("");
-    const widgetId = turnstileWidgetIdRef.current;
-    if (widgetId && window.turnstile) {
-      window.turnstile.remove(widgetId);
-    }
-    turnstileWidgetIdRef.current = null;
-  }, [isOpen, shouldUseCaptcha]);
+    removeCaptchaWidget();
+  }, [isOpen, removeCaptchaWidget, shouldUseCaptcha]);
+
+  React.useEffect(() => {
+    if (!shouldUseCaptcha || mode === "update") return;
+    removeCaptchaWidget();
+  }, [mode, removeCaptchaWidget, shouldUseCaptcha]);
 
   React.useEffect(() => {
     if (!isOpen || !shouldUseCaptcha || mode === "update") return;
@@ -153,21 +162,10 @@ export default function AuthModal({ isOpen, onClose }: Props) {
   }, [isOpen, mode, shouldUseCaptcha, turnstileReady, turnstileSiteKey]);
 
   React.useEffect(() => {
-    if (!shouldUseCaptcha || mode === "update") return;
-    if (!turnstileWidgetIdRef.current || !window.turnstile) return;
-    setCaptchaToken("");
-    window.turnstile.reset(turnstileWidgetIdRef.current);
-  }, [mode, shouldUseCaptcha]);
-
-  React.useEffect(() => {
     return () => {
-      const widgetId = turnstileWidgetIdRef.current;
-      if (widgetId && window.turnstile) {
-        window.turnstile.remove(widgetId);
-      }
-      turnstileWidgetIdRef.current = null;
+      removeCaptchaWidget();
     };
-  }, []);
+  }, [removeCaptchaWidget]);
 
   if (!isOpen) return null;
 
@@ -332,7 +330,7 @@ export default function AuthModal({ isOpen, onClose }: Props) {
               </button>
             </div>
             {shouldUseCaptcha ? (
-              <div style={styles.turnstileWrap}>
+              <div key={`${mode}-captcha`} style={styles.turnstileWrap}>
                 <div ref={turnstileContainerRef} style={styles.turnstileContainer} />
                 {!turnstileReady ? (
                   <div style={styles.turnstileHint}>Loading captcha…</div>
@@ -379,7 +377,7 @@ export default function AuthModal({ isOpen, onClose }: Props) {
               type="email"
             />
             {shouldUseCaptcha ? (
-              <div style={styles.turnstileWrap}>
+              <div key={`${mode}-captcha`} style={styles.turnstileWrap}>
                 <div ref={turnstileContainerRef} style={styles.turnstileContainer} />
                 {!turnstileReady ? (
                   <div style={styles.turnstileHint}>Loading captcha…</div>
