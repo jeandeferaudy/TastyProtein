@@ -27,9 +27,10 @@ declare global {
 type Props = {
   isOpen: boolean;
   onClose: () => void;
+  recoveryNonce?: number;
 };
 
-export default function AuthModal({ isOpen, onClose }: Props) {
+export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props) {
   const turnstileSiteKey = String(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "").trim();
   const shouldUseCaptcha = turnstileSiteKey.length > 0;
   const [email, setEmail] = React.useState("");
@@ -66,6 +67,13 @@ export default function AuthModal({ isOpen, onClose }: Props) {
       subscription.subscription.unsubscribe();
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!recoveryNonce) return;
+    setMode("update");
+    setMsg("");
+    setErr("");
+  }, [recoveryNonce]);
 
   const getAuthEmailRedirectTo = React.useCallback(() => {
     const configured = String(process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();

@@ -299,6 +299,7 @@ export default function Page() {
   const [gridView, setGridView] = React.useState<"list" | "4" | "5">("4");
   const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
   const [authOpen, setAuthOpen] = React.useState<boolean>(false);
+  const [authRecoveryNonce, setAuthRecoveryNonce] = React.useState(0);
   const [authLabel, setAuthLabel] = React.useState<string | null>(null);
   const [authReady, setAuthReady] = React.useState(false);
   const [authProfileName, setAuthProfileName] = React.useState<string>("");
@@ -1008,7 +1009,11 @@ export default function Page() {
     };
 
     loadRole();
-    const { data: subscription } = supabase.auth.onAuthStateChange(() => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthRecoveryNonce((prev) => prev + 1);
+        setAuthOpen(true);
+      }
       loadRole();
     });
     return () => {
@@ -5105,7 +5110,11 @@ React.useEffect(() => {
         formatMoney={formatMoney}
       />
 
-      <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal
+        isOpen={authOpen}
+        onClose={() => setAuthOpen(false)}
+        recoveryNonce={authRecoveryNonce}
+      />
 
       <MyDetailsDrawer
         isOpen={detailsOpen}
