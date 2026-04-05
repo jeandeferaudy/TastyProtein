@@ -2,6 +2,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import type { DbProduct } from "@/lib/products";
 import { getAvailableStock } from "@/lib/stock";
 import { AppButton, GearIcon, QtyIcon } from "@/components/ui";
@@ -157,7 +158,7 @@ export default function ProductCard({
         >
           <div style={styles.listImageShell}>
             {imageUrl ? (
-              <img src={imageUrl} alt={longName} style={styles.listImage} loading="lazy" />
+              <Image src={imageUrl} alt={longName} fill sizes="75px" style={styles.listImage} />
             ) : (
               <div style={styles.listImagePlaceholder} aria-hidden>
                 <LogoPlaceholder style={styles.logoPlaceholder} />
@@ -406,7 +407,13 @@ export default function ProductCard({
       >
         {imageUrl ? (
           <div style={styles.imgFrame}>
-            <img src={imageUrl} alt={longName} style={styles.imgPhoto} loading="lazy" />
+            <Image
+              src={imageUrl}
+              alt={longName}
+              fill
+              sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw"
+              style={styles.imgPhoto}
+            />
           </div>
         ) : (
           <div style={styles.imgFrame} aria-hidden>

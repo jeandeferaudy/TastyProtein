@@ -2,6 +2,7 @@
 "use client";
 
 import * as React from "react";
+import NextImage from "next/image";
 import { createPortal } from "react-dom";
 
 import Navbar from "@/components/Navbar";
@@ -4809,16 +4810,20 @@ React.useEffect(() => {
                       href={activeBanner.link_url.trim()}
                       style={styles.bannerLink}
                     >
-                      <img
+                      <NextImage
                         src={activeBanner.image_url ?? ""}
                         alt="Promotion banner"
+                        fill
+                        sizes="(max-width: 768px) 100vw, min(1000px, 100vw)"
                         style={styles.bannerImage}
                       />
                     </a>
                   ) : (
-                    <img
+                    <NextImage
                       src={activeBanner.image_url ?? ""}
                       alt="Promotion banner"
+                      fill
+                      sizes="(max-width: 768px) 100vw, min(1000px, 100vw)"
                       style={styles.bannerImage}
                     />
                   )}
@@ -5478,7 +5483,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 40,
     background: "black",
     borderBottom: "none",
-    overflow: "hidden",
+    overflow: "visible",
     transition: "max-height 180ms ease, opacity 180ms ease",
   },
   headerInner: {
@@ -5595,6 +5600,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 14,
     overflow: "hidden",
     border: "1px solid rgba(255,255,255,0.2)",
+    position: "relative",
   },
   bannerLink: {
     display: "block",

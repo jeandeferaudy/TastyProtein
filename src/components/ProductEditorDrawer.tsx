@@ -428,10 +428,7 @@ export default function ProductEditorDrawer({
         .filter((row) => row.url)
         .sort((a, b) => a.sort_order - b.sort_order);
       const ownThumb = activeDraft.thumbnail_url.trim() || null;
-      const thumbStillPresent = ownThumb ? cleaned.some((row) => row.url === ownThumb) : false;
-      const resolvedThumbnailUrl = ownThumb && (thumbStillPresent || cleaned.length === 0)
-        ? ownThumb
-        : cleaned[0]?.url ?? null;
+      const resolvedThumbnailUrl = ownThumb ?? cleaned[0]?.url ?? null;
       const productPayload = {
         name: activeDraft.name || null,
         long_name: activeDraft.long_name || null,

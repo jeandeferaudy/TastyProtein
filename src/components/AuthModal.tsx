@@ -346,7 +346,10 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
               </div>
             ) : null}
             <AppButton
-              style={styles.primaryBtn}
+              style={{
+                ...styles.primaryBtn,
+                ...(shouldUseCaptcha ? styles.primaryBtnAfterCaptcha : null),
+              }}
               disabled={loadingAction === "login" || captchaPending}
               onClick={signIn}
             >
@@ -563,6 +566,9 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 1,
     textTransform: "uppercase",
   },
+  primaryBtnAfterCaptcha: {
+    marginTop: 4,
+  },
   forgotLink: {
     marginTop: 4,
     textAlign: "right",
@@ -597,13 +603,13 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.72,
   },
   turnstileWrap: {
-    marginTop: 12,
+    marginTop: 4,
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "center",
-    minHeight: 76,
-    gap: 8,
+    minHeight: 65,
+    gap: 4,
     width: "100%",
   },
   turnstileContainer: {

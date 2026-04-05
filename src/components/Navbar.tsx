@@ -179,7 +179,12 @@ export default function Navbar({
         </AppButton>
       )}
       {authLabel && authMenuOpen ? (
-        <div style={styles.authMenu}>
+        <div
+          style={{
+            ...styles.authMenu,
+            ...(isMobile ? styles.authMenuMobile : null),
+          }}
+        >
           <button
             type="button"
             style={styles.menuItem}
@@ -859,6 +864,14 @@ const styles: Record<string, React.CSSProperties> = {
     background: "var(--tp-nav-inverse)",
     boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
     pointerEvents: "auto",
+  },
+  authMenuMobile: {
+    left: 0,
+    right: "auto",
+    width: "min(260px, calc(100vw - 20px))",
+    maxHeight: "min(70vh, calc(100vh - 150px))",
+    overflowY: "auto",
+    overscrollBehavior: "contain",
   },
   menuItem: {
     width: "100%",
