@@ -84,6 +84,11 @@ import {
 } from "@/lib/purchasesApi";
 import { supabase } from "@/lib/supabase";
 import {
+  buildCustomerInvitePath,
+  parseCustomerInvite,
+  type CustomerInvite,
+} from "@/lib/customerInvite";
+import {
   adjustCustomerSteakCredits,
   deleteCustomerById,
   ensureCustomerForAccountSignup,
@@ -313,6 +318,7 @@ export default function Page() {
   const [gridView, setGridView] = React.useState<"list" | "4" | "5">("4");
   const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
   const [authOpen, setAuthOpen] = React.useState<boolean>(false);
+  const [authInvite, setAuthInvite] = React.useState<CustomerInvite | null>(null);
   const [authRecoveryNonce, setAuthRecoveryNonce] = React.useState(0);
   const [authLabel, setAuthLabel] = React.useState<string | null>(null);
   const [authReady, setAuthReady] = React.useState(false);
@@ -320,6 +326,7 @@ export default function Page() {
   const [authUserId, setAuthUserId] = React.useState<string | null>(null);
   const [authEmail, setAuthEmail] = React.useState<string>("");
   const [authPhone, setAuthPhone] = React.useState<string>("");
+  const [authLinkedCustomerId, setAuthLinkedCustomerId] = React.useState<string | null>(null);
   const [steakCreditsEnabled, setSteakCreditsEnabled] = React.useState<boolean>(false);
   const [detailsOpen, setDetailsOpen] = React.useState<boolean>(false);
   const [ordersOpen, setOrdersOpen] = React.useState<boolean>(false);
@@ -511,6 +518,7 @@ export default function Page() {
   const desktopCenterColWidthCss = `min(980px, calc(var(--tp-rail-width) - ${desktopNavLeftWidth}px))`;
   const desktopSideColWidthCss = `calc((var(--tp-rail-width) - ${desktopCenterColWidthCss}) / 2 - ${desktopNavGap}px)`;
   const pendingRouteRef = React.useRef<{ path: string; search: string } | null>(null);
+  const invitePromptKeyRef = React.useRef<string | null>(null);
   const isApplyingRouteRef = React.useRef(false);
   const drawerRouteHistoryRef = React.useRef<string[]>([]);
   const handleSetCustomer = React.useCallback((next: CustomerDraft) => {
@@ -1007,6 +1015,7 @@ export default function Page() {
         setAuthUserId(null);
         setAuthEmail("");
         setAuthPhone("");
+        setAuthLinkedCustomerId(null);
         setAuthReady(true);
         return;
       }
@@ -1063,6 +1072,7 @@ export default function Page() {
 
   React.useEffect(() => {
     if (!authUserId) {
+      setAuthLinkedCustomerId(null);
       setSteakCreditsEnabled(false);
       setAvailableSteakCredits(0);
       return;
@@ -1089,6 +1099,7 @@ export default function Page() {
           await linkProfileToCustomer(authUserId, emailMatchedCustomer.id).catch(() => null);
         }
       }
+      setAuthLinkedCustomerId(linkedCustomer?.id ? String(linkedCustomer.id) : linkedCustomerId || null);
       setSteakCreditsEnabled(Boolean(linkedCustomer?.steak_credits_enabled));
       setAvailableSteakCredits(Math.max(0, Number(linkedCustomer?.available_steak_credits ?? 0)));
 
@@ -1155,7 +1166,7 @@ export default function Page() {
       }
     };
     void fillCustomer();
-  }, [authUserId, authEmail, authPhone]);
+  }, [authLinkedCustomerId, authUserId, authEmail, authPhone]);
 
   React.useEffect(() => {
     if (!authReady || !authUserId) {
@@ -2975,10 +2986,25 @@ React.useEffect(() => {
         return;
       }
       try {
+        let resolvedCustomerId = authLinkedCustomerId;
+        if (!resolvedCustomerId) {
+          const { data: linkedProfile } = await supabase
+            .from("profiles")
+            .select("customer_id")
+            .eq("id", authUserId)
+            .maybeSingle();
+          resolvedCustomerId = linkedProfile?.customer_id
+            ? String(linkedProfile.customer_id)
+            : null;
+          if (resolvedCustomerId) {
+            setAuthLinkedCustomerId(resolvedCustomerId);
+          }
+        }
         const rows = await fetchOrders({
           userId: authUserId,
           email: authEmail || null,
           phone: authPhone || null,
+          customerId: resolvedCustomerId,
           all: false,
         });
         setMyOrders(rows);
@@ -2995,7 +3021,7 @@ React.useEffect(() => {
     if (!opts?.skipNavigate) {
       pushAppRoute("/myorders");
     }
-  }, [authEmail, authPhone, authUserId, closePrimaryDrawers, pushAppRoute]);
+  }, [authEmail, authLinkedCustomerId, authPhone, authUserId, closePrimaryDrawers, pushAppRoute]);
 
   const openAllOrdersDrawer = React.useCallback((opts?: { skipNavigate?: boolean }) => {
     const loadAllOrders = async () => {
@@ -4087,6 +4113,7 @@ React.useEffect(() => {
         const path = rawPath || "/shop";
         const search = rawSearch || "";
         const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+        const invite = parseCustomerInvite(search);
 
         const requireAuth = (next: { path: string; search: string }) => {
           if (authUserId) {
@@ -4124,6 +4151,7 @@ React.useEffect(() => {
         };
 
         if (path === "/" || path === "/shop") {
+          setAuthInvite(invite);
           const stateScrollTop =
             routeState && typeof routeState.shopScrollTop === "number"
               ? routeState.shopScrollTop
@@ -4135,6 +4163,7 @@ React.useEffect(() => {
           openShop({ skipNavigate: true, preserveScroll: stateScrollTop != null });
           return;
         }
+        setAuthInvite(null);
         if (path === "/shop/product") {
           const id = params.get("id") || params.get("product");
           if (id) {
@@ -4341,6 +4370,34 @@ React.useEffect(() => {
     pendingRouteRef.current = null;
     applyRouteFromLocation(next.path, next.search, null);
   }, [applyRouteFromLocation, authReady, authUserId, isAdmin]);
+
+  React.useEffect(() => {
+    if (!authInvite) {
+      invitePromptKeyRef.current = null;
+      return;
+    }
+    if (!authReady || authUserId) return;
+    const promptKey = `${authInvite.customerId}:${authInvite.email ?? ""}`;
+    if (invitePromptKeyRef.current === promptKey) return;
+    invitePromptKeyRef.current = promptKey;
+    pendingRouteRef.current = { path: "/myorders", search: "" };
+    closePrimaryDrawers();
+    setCartOpen(false);
+    setAuthOpen(true);
+  }, [authInvite, authReady, authUserId, closePrimaryDrawers]);
+
+  const copyCustomerInviteLink = React.useCallback(
+    async (input: { customerId: string; email: string | null }) => {
+      if (typeof window === "undefined") return;
+      const invitePath = buildCustomerInvitePath({
+        customerId: input.customerId,
+        email: input.email,
+      });
+      const inviteUrl = new URL(invitePath, window.location.origin).toString();
+      await navigator.clipboard.writeText(inviteUrl);
+    },
+    []
+  );
 
   const goBackDrawer = React.useCallback(
     (fallback = "/shop") => {
@@ -4796,7 +4853,15 @@ React.useEffect(() => {
         p_email: customerEmail,
         p_phone: customer.phone,
         p_address: composeAddress(customer),
+        p_attention_to: customer.attention_to.trim() || null,
+        p_address_line1: customer.line1.trim() || null,
+        p_address_line2: customer.line2.trim() || null,
+        p_barangay: customer.barangay.trim() || null,
+        p_city: customer.city.trim() || null,
+        p_province: customer.province.trim() || null,
         p_postal_code: payload.postal_code,
+        p_country: customer.country.trim() || "Philippines",
+        p_delivery_note: customer.notes.trim() || null,
         p_notes: composedNotes,
         p_delivery_date: payload.delivery_date,
         p_delivery_slot: payload.delivery_slot,
@@ -5738,6 +5803,10 @@ React.useEffect(() => {
         isOpen={authOpen}
         onClose={() => setAuthOpen(false)}
         recoveryNonce={authRecoveryNonce}
+        invite={authInvite}
+        onAuthenticated={() => {
+          openMyOrdersDrawer();
+        }}
       />
 
       <MyDetailsDrawer
@@ -5870,6 +5939,7 @@ React.useEffect(() => {
         onDeleteUser={handleDeleteUser}
         onLinkCustomerToProfile={handleLinkCustomerToProfile}
         onCombineCustomer={handleCombineCustomers}
+        onCopyInviteLink={copyCustomerInviteLink}
         onBack={() => {
           setSelectedCustomerDetail(null);
           setSelectedCustomerId(null);
@@ -5944,6 +6014,8 @@ React.useEffect(() => {
         products={products}
         loading={loadingOrderDetail}
         canEdit={orderDrawerSource === "all"}
+        gcashQrUrl={checkoutPaymentDraft.gcash_qr_url}
+        gcashPhone={checkoutPaymentDraft.gcash_phone}
         onChangeStatuses={handleOrderStatusChange}
         onChangePackedQty={handleOrderPackedQtyChange}
         onChangeUnitPrice={handleOrderUnitPriceChange}

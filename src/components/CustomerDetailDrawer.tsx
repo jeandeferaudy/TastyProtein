@@ -52,6 +52,7 @@ type Props = {
   onDeleteUser: (profileId: string, customerId: string) => Promise<void> | void;
   onLinkCustomerToProfile: (customerId: string, profileId: string) => Promise<void> | void;
   onCombineCustomer: (customerId: string, otherCustomerId: string) => Promise<void> | void;
+  onCopyInviteLink?: (input: { customerId: string; email: string | null }) => Promise<void> | void;
 };
 
 function fmtMoney(v: number) {
@@ -103,6 +104,7 @@ export default function CustomerDetailDrawer({
   onDeleteUser,
   onLinkCustomerToProfile,
   onCombineCustomer,
+  onCopyInviteLink,
 }: Props) {
   const [search, setSearch] = React.useState("");
   const [isMobileViewport, setIsMobileViewport] = React.useState(false);
@@ -134,6 +136,7 @@ export default function CustomerDetailDrawer({
   const [deleteUserSaving, setDeleteUserSaving] = React.useState(false);
   const [linkSaving, setLinkSaving] = React.useState(false);
   const [combineSaving, setCombineSaving] = React.useState(false);
+  const [inviteCopied, setInviteCopied] = React.useState(false);
   const [portalReady, setPortalReady] = React.useState(false);
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
@@ -179,6 +182,7 @@ export default function CustomerDetailDrawer({
     setDeleteUserSaving(false);
     setLinkSaving(false);
     setCombineSaving(false);
+    setInviteCopied(false);
   }, [
     detail?.customer.address,
     detail?.customer.email,
@@ -330,15 +334,53 @@ export default function CustomerDetailDrawer({
                   <div style={styles.cardLabel}>Customer</div>
                   <div style={styles.customerNameRow}>
                     <div style={styles.customerName}>{customerName}</div>
-                    <button
-                      type="button"
-                      style={styles.editProfileButton}
-                      onClick={() => setProfileEditorOpen(true)}
-                      aria-label="Edit customer profile"
-                    >
-                      EDIT
-                    </button>
+                    <div style={styles.customerActions}>
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.inviteButton,
+                          ...(!detail.customer.phone ? styles.inviteButtonDisabled : null),
+                        }}
+                        disabled={!detail.customer.phone}
+                        onClick={async () => {
+                          if (!detail || !detail.customer.phone || !onCopyInviteLink) return;
+                          try {
+                            await onCopyInviteLink({
+                              customerId: detail.customer.id,
+                              email: detail.customer.email,
+                            });
+                            setInviteCopied(true);
+                            window.setTimeout(() => setInviteCopied(false), 1800);
+                          } catch (error) {
+                            console.error("Failed to copy invite link", error);
+                            alert("Failed to copy invite link.");
+                          }
+                        }}
+                        aria-label="Copy invite link"
+                        title={
+                          detail.customer.phone
+                            ? "Copy invite link"
+                            : "Add a customer phone number before sending an invite"
+                        }
+                      >
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                          <path
+                            d="M3 6.75A2.75 2.75 0 0 1 5.75 4h12.5A2.75 2.75 0 0 1 21 6.75v10.5A2.75 2.75 0 0 1 18.25 20H5.75A2.75 2.75 0 0 1 3 17.25ZM5.4 6.5l6.1 5.07a.8.8 0 0 0 1 0l6.1-5.07H5.4Zm13.1 1.04-5.48 4.55a2.4 2.4 0 0 1-3.04 0L4.5 7.54v9.71c0 .69.56 1.25 1.25 1.25h12.5c.69 0 1.25-.56 1.25-1.25Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.editProfileButton}
+                        onClick={() => setProfileEditorOpen(true)}
+                        aria-label="Edit customer profile"
+                      >
+                        EDIT
+                      </button>
+                    </div>
                   </div>
+                  {inviteCopied ? <div style={styles.inviteCopied}>Link copied</div> : null}
                   <div style={styles.identityFieldRow}>
                     <label style={styles.identityFieldLabel}>Email</label>
                     <div style={styles.identityEmailRow}>
@@ -990,6 +1032,11 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "space-between",
     gap: 12,
   },
+  customerActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
   editProfileButton: {
     height: 32,
     minWidth: 56,
@@ -1002,6 +1049,31 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     letterSpacing: 0.8,
     cursor: "pointer",
+  },
+  inviteButton: {
+    width: 32,
+    minWidth: 32,
+    height: 32,
+    borderRadius: 999,
+    border: "1px solid var(--tp-border-color-soft)",
+    background: "rgba(255,255,255,0.04)",
+    color: "var(--tp-text-color)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+  },
+  inviteButtonDisabled: {
+    opacity: 0.4,
+    cursor: "not-allowed",
+  },
+  inviteCopied: {
+    marginTop: 8,
+    color: "#67bf8a",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 0.3,
   },
   identityFieldRow: {
     display: "grid",

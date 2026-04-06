@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { CustomerInvite } from "@/lib/customerInvite";
 import {
   ensureCustomerForAccountSignup,
   linkProfileToCustomer,
@@ -32,11 +33,21 @@ type Props = {
   isOpen: boolean;
   onClose: () => void;
   recoveryNonce?: number;
+  invite?: CustomerInvite | null;
+  onAuthenticated?: () => void;
 };
 
-export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props) {
+export default function AuthModal({
+  isOpen,
+  onClose,
+  recoveryNonce = 0,
+  invite = null,
+  onAuthenticated,
+}: Props) {
+  const isInviteFlow = Boolean(invite?.customerId);
   const turnstileSiteKey = String(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "").trim();
   const shouldUseCaptcha = turnstileSiteKey.length > 0;
+  const [phoneVerification, setPhoneVerification] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
@@ -58,6 +69,24 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
     setMsg("");
     setErr("");
   };
+
+  const normalizeInvitePhone = React.useCallback((value: string | null | undefined) => {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    if (!digits) return "";
+    if (digits.startsWith("63") && digits.length >= 12) return digits.slice(2);
+    if (digits.startsWith("0") && digits.length >= 11) return digits.slice(1);
+    return digits;
+  }, []);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    clearStatus();
+    setMode("login");
+    setPhoneVerification("");
+    setPassword("");
+    setConfirmPassword("");
+    setEmail("");
+  }, [invite?.customerId, isOpen]);
 
   React.useEffect(() => {
     const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
@@ -188,17 +217,23 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
       if (!email.trim() || !password.trim()) {
         throw new Error("Please fill in email and password.");
       }
+      const normalizedEmail = email.trim().toLowerCase();
       if (shouldUseCaptcha && !captchaToken) {
         throw new Error("Please complete the captcha.");
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
         password,
         options: shouldUseCaptcha ? { captchaToken } : undefined,
       });
       if (error) throw error;
+      const signedInUserId = data.user?.id ? String(data.user.id) : "";
+      if (invite?.customerId && signedInUserId) {
+        await linkProfileToCustomer(signedInUserId, invite.customerId).catch(() => null);
+      }
       onClose();
+      onAuthenticated?.();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Authentication failed.");
     } finally {
@@ -211,14 +246,52 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
     clearStatus();
     setLoadingAction("signup");
     try {
+      const typedPhone = normalizeInvitePhone(phoneVerification);
+      if (isInviteFlow && !typedPhone) {
+        throw new Error("Please confirm your phone number.");
+      }
       if (!email.trim()) throw new Error("Email is required.");
       if (!password.trim()) throw new Error("Password is required.");
       if (shouldUseCaptcha && !captchaToken) {
         throw new Error("Please complete the captcha.");
       }
+      const normalizedEmail = email.trim().toLowerCase();
+      if (isInviteFlow) {
+        const response = await fetch("/api/invite-signup", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            customerId: invite?.customerId,
+            phone: typedPhone,
+            email: normalizedEmail,
+            password,
+          }),
+        });
+        const payload = (await response.json()) as { ok?: boolean; error?: string };
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "Sign up failed.");
+        }
+        const signIn = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+          options: shouldUseCaptcha ? { captchaToken } : undefined,
+        });
+        if (signIn.error) {
+          throw new Error(
+            signIn.error.message ||
+              "Account was created, but we could not sign you in automatically."
+          );
+        }
+        onClose();
+        onAuthenticated?.();
+        return;
+      }
+
       const redirectTo = getAuthEmailRedirectTo();
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
         options: {
           ...(redirectTo ? { emailRedirectTo: redirectTo } : null),
@@ -241,8 +314,8 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
       const newUserId = data.user?.id ? String(data.user.id) : "";
       if (newUserId) {
         const customerRecord = await ensureCustomerForAccountSignup({
-          email: email.trim(),
-          fullName: email.trim(),
+          email: normalizedEmail,
+          fullName: normalizedEmail,
         });
         await supabase
           .from("profiles")
@@ -311,7 +384,11 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
       <div style={styles.modal} role="dialog" aria-modal="true" aria-label="Login or create account">
         <div style={styles.top}>
           <div style={styles.title}>
-            {mode === "update" || mode === "reset" ? "RESET PASSWORD" : "WELCOME"}
+            {mode === "update" || mode === "reset"
+              ? "RESET PASSWORD"
+              : isInviteFlow
+                ? "INVITATION TO CREATE YOUR ACCOUNT"
+                : "WELCOME"}
           </div>
           {mode === "update" ? null : (
             <AppButton variant="ghost" style={styles.closeBtn} onClick={onClose}>
@@ -319,8 +396,72 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
             </AppButton>
           )}
         </div>
+        {isInviteFlow && mode !== "update" ? (
+          <div style={styles.inviteBanner}>Confirm your phone number</div>
+        ) : null}
 
-        {mode === "login" ? (
+        {isInviteFlow && mode !== "update" ? (
+          <div style={styles.form}>
+            <input
+              style={styles.input}
+              value={phoneVerification}
+              onChange={(e) => setPhoneVerification(e.target.value)}
+              placeholder="Phone number"
+              type="tel"
+              autoComplete="tel"
+            />
+            <input
+              style={styles.input}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              type="email"
+              autoComplete="email"
+            />
+            <div style={styles.passwordField}>
+              <input
+                style={styles.input}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                style={styles.eyeBtn}
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path
+                    d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"
+                    fill="currentColor"
+                  />
+                  <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+            {shouldUseCaptcha ? (
+              <div key="invite-captcha" style={styles.turnstileWrap}>
+                <div ref={turnstileContainerRef} style={styles.turnstileContainer} />
+                {!turnstileReady ? (
+                  <div style={styles.turnstileHint}>Loading captcha…</div>
+                ) : null}
+              </div>
+            ) : null}
+            <AppButton
+              style={{
+                ...styles.primaryBtn,
+                ...(shouldUseCaptcha ? styles.primaryBtnAfterCaptcha : null),
+              }}
+              disabled={loadingAction === "signup" || captchaPending}
+              onClick={signUp}
+            >
+              {loadingAction === "signup" ? "PLEASE WAIT..." : "CREATE ACCOUNT"}
+            </AppButton>
+          </div>
+        ) : mode === "login" ? (
           <div style={styles.form}>
             <input
               style={styles.input}
@@ -368,7 +509,11 @@ export default function AuthModal({ isOpen, onClose, recoveryNonce = 0 }: Props)
               disabled={loadingAction === "login" || captchaPending}
               onClick={signIn}
             >
-              {loadingAction === "login" ? "PLEASE WAIT..." : "LOGIN"}
+              {loadingAction === "login"
+                ? "PLEASE WAIT..."
+                : invite?.customerId
+                  ? "LOGIN TO CONTINUE"
+                  : "LOGIN"}
             </AppButton>
 
             <button
@@ -539,6 +684,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     letterSpacing: 2,
   },
+  inviteBanner: {
+    marginBottom: 12,
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 14,
+    lineHeight: 1.4,
+  },
   closeBtn: {
     width: 68,
     minWidth: 68,
@@ -637,7 +788,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   msg: {
     marginTop: 10,
-    color: "var(--tp-accent)",
+    color: "#67bf8a",
     fontSize: 15,
     textAlign: "center",
   },

@@ -23,6 +23,11 @@ begin
   if not found then
     raise exception 'Profile not found';
   end if;
+
+  update public.orders
+  set user_id = p_profile_id
+  where customer_id = p_customer_id
+    and user_id is distinct from p_profile_id;
 end;
 $$;
 

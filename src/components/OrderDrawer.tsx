@@ -13,6 +13,8 @@ type Props = {
   products: DbProduct[];
   loading?: boolean;
   canEdit?: boolean;
+  gcashQrUrl?: string;
+  gcashPhone?: string;
   noticeText?: string | null;
   backgroundStyle?: React.CSSProperties;
   onChangeStatuses?: (orderId: string, patch: OrderStatusPatch) => Promise<void> | void;
@@ -132,6 +134,8 @@ export default function OrderDrawer({
   products,
   loading = false,
   canEdit = false,
+  gcashQrUrl = "",
+  gcashPhone = "",
   noticeText = null,
   backgroundStyle,
   onChangeStatuses,
@@ -158,6 +162,8 @@ export default function OrderDrawer({
   const [proofOpen, setProofOpen] = React.useState(false);
   const [proofPreviewMode, setProofPreviewMode] = React.useState<"image" | "frame">("image");
   const [savingProof, setSavingProof] = React.useState(false);
+  const [paymentOpen, setPaymentOpen] = React.useState(false);
+  const [copyNoticeVisible, setCopyNoticeVisible] = React.useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
   const [deletingOrder, setDeletingOrder] = React.useState(false);
   const [addLinesOpen, setAddLinesOpen] = React.useState(false);
@@ -259,6 +265,12 @@ export default function OrderDrawer({
     }
     setProofPreviewMode(looksLikeImage(detail.payment_proof_url) ? "image" : "frame");
   }, [detail?.payment_proof_url]);
+
+  React.useEffect(() => {
+    if (!copyNoticeVisible) return;
+    const timer = window.setTimeout(() => setCopyNoticeVisible(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [copyNoticeVisible]);
 
   const customerDeliveryPending = React.useMemo(() => {
     if (!detail || canEdit) return false;
@@ -387,6 +399,22 @@ export default function OrderDrawer({
     const last = clean.split("/").pop() || "";
     return decodeURIComponent(last) || "attachment";
   }, [detail?.payment_proof_path, detail?.payment_proof_url]);
+
+  const paymentDue = React.useMemo(() => {
+    if (!detail) return 0;
+    return Math.max(0, Number(detail.total_selling_price ?? 0) - Number(detail.amount_paid ?? 0));
+  }, [detail]);
+
+  const showMakePayment = !canEdit && !!detail && String(detail.paid_status || "").toLowerCase() !== "paid";
+
+  const gcashPhoneRaw = gcashPhone.trim();
+  const gcashPhoneDisplay = React.useMemo(() => {
+    const digits = gcashPhoneRaw.replace(/\D/g, "");
+    if (digits.length === 11 && digits.startsWith("0")) {
+      return `${digits.slice(0, 1)} ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+    }
+    return gcashPhoneRaw;
+  }, [gcashPhoneRaw]);
 
   const addCandidates = React.useMemo(() => {
     const q = addLineSearch.trim().toLowerCase();
@@ -1377,7 +1405,18 @@ export default function OrderDrawer({
                   </div>
                   <div style={styles.kvRow}>
                     <span>Total</span>
-                    <strong>₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}</strong>
+                    <div style={styles.totalPayCell}>
+                      <strong>₱ {fmtMoney(canEdit ? computedDisplayTotal : detail.total_selling_price)}</strong>
+                      {showMakePayment ? (
+                        <button
+                          type="button"
+                          style={styles.makePaymentBtn}
+                          onClick={() => setPaymentOpen(true)}
+                        >
+                          MAKE PAYMENT
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
                 </section>
@@ -1434,6 +1473,96 @@ export default function OrderDrawer({
             ) : (
               <iframe src={detail.payment_proof_url} title="Payment proof" style={styles.previewFrame} />
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {paymentOpen && detail ? (
+        <div style={styles.previewBackdrop} onClick={() => setPaymentOpen(false)}>
+          <div style={styles.paymentModal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.previewTop}>
+              <div style={styles.previewTitle}>MAKE PAYMENT</div>
+              <AppButton variant="ghost" style={styles.previewClose} onClick={() => setPaymentOpen(false)}>
+                CLOSE
+              </AppButton>
+            </div>
+            <div style={styles.paymentHelp}>
+              Scan the QR code, complete the payment, then upload your screenshot here.
+            </div>
+            <div
+              style={{
+                ...styles.paymentQrGrid,
+                ...(isMobileViewport ? { gridTemplateColumns: "1fr" } : null),
+              }}
+            >
+              <div style={styles.paymentQrLeft}>
+                {gcashQrUrl.trim() ? (
+                  <img src={gcashQrUrl.trim()} alt="GCash QR code" style={styles.paymentQrImage} />
+                ) : (
+                  <div style={styles.paymentQrPlaceholder}>QR unavailable</div>
+                )}
+                {gcashPhoneRaw ? (
+                  <div style={styles.paymentPhoneRow}>
+                    <span>GCASH to</span>
+                    <button
+                      type="button"
+                      style={styles.paymentPhoneBtn}
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(gcashPhoneRaw);
+                          setCopyNoticeVisible(true);
+                        } catch {
+                          // Clipboard may be unavailable in some contexts.
+                        }
+                      }}
+                    >
+                      {gcashPhoneDisplay}
+                    </button>
+                    {copyNoticeVisible ? <span style={styles.copyNotice}>Copied</span> : null}
+                  </div>
+                ) : null}
+              </div>
+              <div style={styles.paymentQrRight}>
+                <div style={styles.paymentAmountLabel}>Amount due</div>
+                <div style={styles.paymentAmountValue}>₱ {fmtMoney(paymentDue)}</div>
+                <div style={styles.proofCell}>
+                  <label style={{ ...styles.uploadBtn, minWidth: 140 }}>
+                    Upload Screenshot
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        if (!f) return;
+                        void savePaymentProof(f);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                  {detail.payment_proof_url ? (
+                    <>
+                      <button type="button" style={styles.fileNameBtn} onClick={() => setProofOpen(true)}>
+                        {proofFileName}
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.removeFileBtn}
+                        onClick={() => {
+                          void savePaymentProof(null);
+                        }}
+                        aria-label="Remove uploaded proof"
+                        title="Remove file"
+                      >
+                        <RemoveIcon size={14} />
+                      </button>
+                    </>
+                  ) : (
+                    <span style={styles.noFile}>No screenshot uploaded yet</span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2078,6 +2207,29 @@ const styles: Record<string, React.CSSProperties> = {
   paymentDeltaRow: { marginTop: 4, fontSize: 15, color: "#c38a28" },
   paymentDeltaRowWarn: { marginTop: 4, fontSize: 15, color: "#de6464" },
   paymentDeltaRowOk: { marginTop: 4, fontSize: 15, color: "#67bf8a" },
+  totalPayCell: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+  },
+  makePaymentBtn: {
+    height: 30,
+    minWidth: 128,
+    borderRadius: 8,
+    border: "1px solid var(--tp-border-color)",
+    background: "var(--tp-control-bg-soft)",
+    color: "var(--tp-text-color)",
+    fontSize: 15,
+    fontWeight: 700,
+    letterSpacing: 0.4,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 15px",
+  },
   adminHighlight: { color: "#c38a28", fontWeight: 900 },
   addLineRow: { marginTop: 14, display: "flex", justifyContent: "space-between", gap: 12 },
   addLineBtn: {
@@ -2121,8 +2273,104 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     boxShadow: "0 18px 48px rgba(0,0,0,0.42)",
   },
+  paymentModal: {
+    width: "min(100%, 880px)",
+    maxHeight: "calc(100vh - 40px)",
+    border: "1px solid var(--tp-border-color)",
+    borderRadius: 12,
+    background: "#0f0f0f",
+    padding: 16,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    boxShadow: "0 18px 48px rgba(0,0,0,0.42)",
+  },
   previewTop: { display: "flex", alignItems: "center", justifyContent: "space-between" },
   previewTitle: { fontSize: 15, fontWeight: 800, letterSpacing: 1, color: "var(--tp-text-color)" },
+  paymentHelp: {
+    fontSize: 15,
+    lineHeight: 1.4,
+    color: "rgba(255,255,255,0.86)",
+  },
+  paymentQrGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(260px, 320px) minmax(0, 1fr)",
+    gap: 18,
+    alignItems: "start",
+  },
+  paymentQrLeft: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 10,
+  },
+  paymentQrRight: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    justifyContent: "center",
+    minWidth: 0,
+  },
+  paymentQrImage: {
+    width: "100%",
+    maxWidth: 320,
+    aspectRatio: "1 / 1",
+    objectFit: "contain",
+    borderRadius: 12,
+    background: "#fff",
+  },
+  paymentQrPlaceholder: {
+    width: "100%",
+    maxWidth: 320,
+    aspectRatio: "1 / 1",
+    borderRadius: 12,
+    border: "1px dashed rgba(255,255,255,0.28)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "rgba(255,255,255,0.65)",
+    background: "rgba(255,255,255,0.04)",
+    fontWeight: 700,
+    letterSpacing: 0.4,
+  },
+  paymentPhoneRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "center",
+    fontSize: 14,
+    color: "rgba(255,255,255,0.82)",
+  },
+  paymentPhoneBtn: {
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    background: "rgba(255,255,255,0.06)",
+    color: "#fff",
+    height: 34,
+    padding: "0 14px",
+    fontSize: 15,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  paymentAmountLabel: {
+    fontSize: 14,
+    fontWeight: 800,
+    letterSpacing: 1,
+    color: "rgba(255,255,255,0.7)",
+    textTransform: "uppercase",
+  },
+  paymentAmountValue: {
+    fontSize: 36,
+    fontWeight: 900,
+    lineHeight: 1,
+    color: "#fff",
+  },
+  copyNotice: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#67bf8a",
+  },
   previewClose: {
     width: 72,
     minWidth: 72,

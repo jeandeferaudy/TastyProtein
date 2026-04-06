@@ -233,6 +233,37 @@ export async function updateOrderPaymentProof(
   file: File | null,
   currentPath: string | null = null
 ) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (session?.access_token) {
+    const formData = new FormData();
+    formData.append("orderId", orderId);
+    if (currentPath) {
+      formData.append("currentPath", currentPath);
+    }
+    if (file) {
+      formData.append("file", file);
+    }
+
+    const response = await fetch("/api/orders/payment-proof", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: formData,
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; error?: string }
+      | null;
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || "Failed to update payment proof.");
+    }
+    return;
+  }
+
   const tryRemove = async (path: string) => {
     await supabase.storage.from("payment-proofs").remove([path]);
     await supabase.storage.from("payment_proofs").remove([path]);
@@ -335,9 +366,7 @@ export async function fetchOrders(params: {
       typeof r.placed_for_someone_else === "boolean" ? r.placed_for_someone_else : null,
   }));
 
-  const visibleBase = all
-    ? base
-    : base.filter((row) => row.placed_for_someone_else !== true);
+  const visibleBase = base;
 
   const ids = visibleBase.map((r) => r.id).filter(Boolean);
   if (!ids.length) return visibleBase;
@@ -427,17 +456,50 @@ export async function fetchOrderDetail(orderId: string): Promise<OrderDetail | n
   if (rawProofUrl && !String(rawProofUrl).startsWith("http")) {
     try {
       const path = String(rawProofUrl);
-      const signedA = await supabase.storage.from("payment-proofs").createSignedUrl(path, 3600);
-      if (!signedA.error && signedA.data?.signedUrl) {
-        paymentProofUrl = signedA.data.signedUrl;
-      } else {
-        const signedB = await supabase.storage.from("payment_proofs").createSignedUrl(path, 3600);
-        if (!signedB.error && signedB.data?.signedUrl) {
-          paymentProofUrl = signedB.data.signedUrl;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const response = await fetch(
+          `/api/orders/payment-proof?orderId=${encodeURIComponent(orderId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+        const payload = (await response.json().catch(() => null)) as
+          | { ok?: boolean; signedUrl?: string | null }
+          | null;
+        if (response.ok && payload?.ok && payload.signedUrl) {
+          paymentProofUrl = payload.signedUrl;
         } else {
-          // Fallback for public bucket configurations.
-          paymentProofUrl = supabase.storage.from("payment-proofs").getPublicUrl(path).data
-            .publicUrl;
+          const signedA = await supabase.storage.from("payment-proofs").createSignedUrl(path, 3600);
+          if (!signedA.error && signedA.data?.signedUrl) {
+            paymentProofUrl = signedA.data.signedUrl;
+          } else {
+            const signedB = await supabase.storage.from("payment_proofs").createSignedUrl(path, 3600);
+            if (!signedB.error && signedB.data?.signedUrl) {
+              paymentProofUrl = signedB.data.signedUrl;
+            } else {
+              paymentProofUrl = supabase.storage.from("payment-proofs").getPublicUrl(path).data
+                .publicUrl;
+            }
+          }
+        }
+      } else {
+        const signedA = await supabase.storage.from("payment-proofs").createSignedUrl(path, 3600);
+        if (!signedA.error && signedA.data?.signedUrl) {
+          paymentProofUrl = signedA.data.signedUrl;
+        } else {
+          const signedB = await supabase.storage.from("payment_proofs").createSignedUrl(path, 3600);
+          if (!signedB.error && signedB.data?.signedUrl) {
+            paymentProofUrl = signedB.data.signedUrl;
+          } else {
+            // Fallback for public bucket configurations.
+            paymentProofUrl = supabase.storage.from("payment-proofs").getPublicUrl(path).data
+              .publicUrl;
+          }
         }
       }
     } catch (e) {
