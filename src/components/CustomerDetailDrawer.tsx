@@ -137,6 +137,7 @@ export default function CustomerDetailDrawer({
   const [linkSaving, setLinkSaving] = React.useState(false);
   const [combineSaving, setCombineSaving] = React.useState(false);
   const [inviteCopied, setInviteCopied] = React.useState(false);
+  const [adminOpen, setAdminOpen] = React.useState(false);
   const [portalReady, setPortalReady] = React.useState(false);
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
@@ -183,6 +184,7 @@ export default function CustomerDetailDrawer({
     setLinkSaving(false);
     setCombineSaving(false);
     setInviteCopied(false);
+    setAdminOpen(false);
   }, [
     detail?.customer.address,
     detail?.customer.email,
@@ -597,168 +599,177 @@ export default function CustomerDetailDrawer({
               </div>
 
               <div style={styles.actionsPanel}>
-                <div style={styles.sectionTitle}>ADMIN ONLY</div>
-                <div style={{ ...styles.actionsGrid, ...(isMobileViewport ? styles.actionsGridMobile : null) }}>
-                  <div style={styles.actionsCard}>
-                    <div style={styles.cleanupTitle}>Cleanup</div>
-                    {!detail.has_account ? (
-                      <AppButton
-                        type="button"
-                        variant="ghost"
-                        style={styles.cleanupDangerButton}
-                        disabled={deleteSaving}
-                        onClick={async () => {
-                          if (!detail) return;
-                          if (!window.confirm("Delete this customer?")) return;
-                          setDeleteSaving(true);
-                          try {
-                            await onDeleteCustomer(detail.customer.id);
-                          } catch (error) {
-                            console.error("Failed to delete customer", error);
-                            alert("Failed to delete customer.");
-                          } finally {
-                            setDeleteSaving(false);
-                          }
-                        }}
-                      >
-                        {deleteSaving ? "DELETING..." : "DELETE CUSTOMER"}
-                      </AppButton>
-                    ) : (
-                      <div style={styles.cleanupPlaceholder}>Customer is already linked to a user.</div>
-                    )}
+                <button
+                  type="button"
+                  style={styles.adminToggle}
+                  onClick={() => setAdminOpen((prev) => !prev)}
+                >
+                  <span style={styles.sectionTitle}>ADMIN ONLY</span>
+                  <span style={styles.adminToggleIcon}>{adminOpen ? "−" : "+"}</span>
+                </button>
+                {adminOpen ? (
+                  <div style={{ ...styles.actionsGrid, ...(isMobileViewport ? styles.actionsGridMobile : null) }}>
+                    <div style={styles.actionsCard}>
+                      <div style={styles.cleanupTitle}>Cleanup</div>
+                      {!detail.has_account ? (
+                        <AppButton
+                          type="button"
+                          variant="ghost"
+                          style={styles.cleanupDangerButton}
+                          disabled={deleteSaving}
+                          onClick={async () => {
+                            if (!detail) return;
+                            if (!window.confirm("Delete this customer?")) return;
+                            setDeleteSaving(true);
+                            try {
+                              await onDeleteCustomer(detail.customer.id);
+                            } catch (error) {
+                              console.error("Failed to delete customer", error);
+                              alert("Failed to delete customer.");
+                            } finally {
+                              setDeleteSaving(false);
+                            }
+                          }}
+                        >
+                          {deleteSaving ? "DELETING..." : "DELETE CUSTOMER"}
+                        </AppButton>
+                      ) : (
+                        <div style={styles.cleanupPlaceholder}>Customer is already linked to a user.</div>
+                      )}
 
-                    {linkedProfiles.length > 0 && deleteUserAvailable ? (
-                      <AppButton
-                        type="button"
-                        variant="ghost"
-                        style={styles.cleanupDangerButton}
-                        disabled={deleteUserSaving}
-                        onClick={async () => {
-                          if (!detail || linkedProfiles.length === 0) return;
-                          if (!window.confirm("Delete the linked user account?")) return;
-                          setDeleteUserSaving(true);
-                          try {
-                            await onDeleteUser(linkedProfiles[0].id, detail.customer.id);
-                          } catch (error) {
-                            console.error("Failed to delete user", error);
-                            alert("Failed to delete user.");
-                          } finally {
-                            setDeleteUserSaving(false);
-                          }
-                        }}
-                      >
-                        {deleteUserSaving ? "DELETING..." : "DELETE USER"}
-                      </AppButton>
-                    ) : null}
-                  </div>
+                      {linkedProfiles.length > 0 && deleteUserAvailable ? (
+                        <AppButton
+                          type="button"
+                          variant="ghost"
+                          style={styles.cleanupDangerButton}
+                          disabled={deleteUserSaving}
+                          onClick={async () => {
+                            if (!detail || linkedProfiles.length === 0) return;
+                            if (!window.confirm("Delete the linked user account?")) return;
+                            setDeleteUserSaving(true);
+                            try {
+                              await onDeleteUser(linkedProfiles[0].id, detail.customer.id);
+                            } catch (error) {
+                              console.error("Failed to delete user", error);
+                              alert("Failed to delete user.");
+                            } finally {
+                              setDeleteUserSaving(false);
+                            }
+                          }}
+                        >
+                          {deleteUserSaving ? "DELETING..." : "DELETE USER"}
+                        </AppButton>
+                      ) : null}
+                    </div>
 
-                  <div style={styles.actionsCard}>
-                    <div style={styles.cleanupTitle}>Link to user</div>
-                    {!detail.has_account ? (
+                    <div style={styles.actionsCard}>
+                      <div style={styles.cleanupTitle}>Link to user</div>
+                      {!detail.has_account ? (
+                        <div style={styles.cleanupBlock}>
+                          <div style={styles.cleanupLabel}>Select user</div>
+                          <input
+                            value={linkQuery}
+                            onChange={(event) => setLinkQuery(event.target.value)}
+                            placeholder="Search user profile..."
+                            style={styles.cleanupInput}
+                          />
+                          {filteredProfiles.length > 0 ? (
+                            <div style={styles.cleanupList}>
+                              {filteredProfiles.map((profile) => {
+                                const displayName =
+                                  [profile.first_name, profile.last_name]
+                                    .filter(Boolean)
+                                    .join(" ")
+                                    .trim() || `User ${profile.id.slice(0, 8)}`;
+                                const linkedCustomerLabel = profile.customer_id
+                                  ? linkedCustomerLabels.get(profile.customer_id) ?? "Linked customer"
+                                  : "No customer yet";
+                                return (
+                                  <button
+                                    key={profile.id}
+                                    type="button"
+                                    style={styles.cleanupOption}
+                                    disabled={linkSaving}
+                                    onClick={async () => {
+                                      if (!detail) return;
+                                      const actionText = profile.customer_id
+                                        ? "This user already has a customer. Transfer this customer's orders to that customer?"
+                                        : "Link this customer to the selected user?";
+                                      if (!window.confirm(actionText)) return;
+                                      setLinkSaving(true);
+                                      try {
+                                        await onLinkCustomerToProfile(detail.customer.id, profile.id);
+                                      } catch (error) {
+                                        console.error("Failed to link customer", error);
+                                        alert("Failed to link customer.");
+                                      } finally {
+                                        setLinkSaving(false);
+                                      }
+                                    }}
+                                  >
+                                    <span>{displayName}</span>
+                                    <span style={styles.cleanupOptionMeta}>{linkedCustomerLabel}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div style={styles.cleanupPlaceholder}>This customer already has a linked user.</div>
+                      )}
+                    </div>
+
+                    <div style={styles.actionsCard}>
+                      <div style={styles.cleanupTitle}>Combine</div>
                       <div style={styles.cleanupBlock}>
-                        <div style={styles.cleanupLabel}>Select user</div>
+                        <div style={styles.cleanupLabel}>Combine with customer</div>
                         <input
-                          value={linkQuery}
-                          onChange={(event) => setLinkQuery(event.target.value)}
-                          placeholder="Search user profile..."
+                          value={combineQuery}
+                          onChange={(event) => setCombineQuery(event.target.value)}
+                          placeholder="Search customer..."
                           style={styles.cleanupInput}
                         />
-                        {filteredProfiles.length > 0 ? (
+                        {filteredCombineCustomers.length > 0 ? (
                           <div style={styles.cleanupList}>
-                            {filteredProfiles.map((profile) => {
-                              const displayName =
-                                [profile.first_name, profile.last_name]
-                                  .filter(Boolean)
-                                  .join(" ")
-                                  .trim() || `User ${profile.id.slice(0, 8)}`;
-                              const linkedCustomerLabel = profile.customer_id
-                                ? linkedCustomerLabels.get(profile.customer_id) ?? "Linked customer"
-                                : "No customer yet";
-                              return (
-                                <button
-                                  key={profile.id}
-                                  type="button"
-                                  style={styles.cleanupOption}
-                                  disabled={linkSaving}
-                                  onClick={async () => {
-                                    if (!detail) return;
-                                    const actionText = profile.customer_id
-                                      ? "This user already has a customer. Transfer this customer's orders to that customer?"
-                                      : "Link this customer to the selected user?";
-                                    if (!window.confirm(actionText)) return;
-                                    setLinkSaving(true);
-                                    try {
-                                      await onLinkCustomerToProfile(detail.customer.id, profile.id);
-                                    } catch (error) {
-                                      console.error("Failed to link customer", error);
-                                      alert("Failed to link customer.");
-                                    } finally {
-                                      setLinkSaving(false);
-                                    }
-                                  }}
-                                >
-                                  <span>{displayName}</span>
-                                  <span style={styles.cleanupOptionMeta}>{linkedCustomerLabel}</span>
-                                </button>
-                              );
-                            })}
+                            {filteredCombineCustomers.map((customer) => (
+                              <button
+                                key={customer.id}
+                                type="button"
+                                style={styles.cleanupOption}
+                                disabled={combineSaving}
+                                onClick={async () => {
+                                  if (!detail) return;
+                                  if (
+                                    !window.confirm(
+                                      "Combine these customers? Orders will be transferred and one customer will be removed."
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  setCombineSaving(true);
+                                  try {
+                                    await onCombineCustomer(detail.customer.id, customer.id);
+                                  } catch (error) {
+                                    console.error("Failed to combine customers", error);
+                                    alert("Failed to combine customers.");
+                                  } finally {
+                                    setCombineSaving(false);
+                                  }
+                                }}
+                              >
+                                <span>{customer.customer_name}</span>
+                                <span style={styles.cleanupOptionMeta}>
+                                  {customer.has_account ? "Has user" : "No user"}
+                                </span>
+                              </button>
+                            ))}
                           </div>
                         ) : null}
                       </div>
-                    ) : (
-                      <div style={styles.cleanupPlaceholder}>This customer already has a linked user.</div>
-                    )}
-                  </div>
-
-                  <div style={styles.actionsCard}>
-                    <div style={styles.cleanupTitle}>Combine</div>
-                    <div style={styles.cleanupBlock}>
-                      <div style={styles.cleanupLabel}>Combine with customer</div>
-                      <input
-                        value={combineQuery}
-                        onChange={(event) => setCombineQuery(event.target.value)}
-                        placeholder="Search customer..."
-                        style={styles.cleanupInput}
-                      />
-                      {filteredCombineCustomers.length > 0 ? (
-                        <div style={styles.cleanupList}>
-                          {filteredCombineCustomers.map((customer) => (
-                            <button
-                              key={customer.id}
-                              type="button"
-                              style={styles.cleanupOption}
-                              disabled={combineSaving}
-                              onClick={async () => {
-                                if (!detail) return;
-                                if (
-                                  !window.confirm(
-                                    "Combine these customers? Orders will be transferred and one customer will be removed."
-                                  )
-                                ) {
-                                  return;
-                                }
-                                setCombineSaving(true);
-                                try {
-                                  await onCombineCustomer(detail.customer.id, customer.id);
-                                } catch (error) {
-                                  console.error("Failed to combine customers", error);
-                                  alert("Failed to combine customers.");
-                                } finally {
-                                  setCombineSaving(false);
-                                }
-                              }}
-                            >
-                              <span>{customer.customer_name}</span>
-                              <span style={styles.cleanupOptionMeta}>
-                                {customer.has_account ? "Has user" : "No user"}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
                     </div>
                   </div>
-                </div>
+                ) : null}
               </div>
             </>
           )}
@@ -1122,6 +1133,25 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     gap: 14,
     paddingRight: 12,
+  },
+  adminToggle: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "0 0 2px",
+    border: "none",
+    background: "transparent",
+    color: "var(--tp-text-color)",
+    cursor: "pointer",
+    textAlign: "left",
+  },
+  adminToggleIcon: {
+    fontSize: 24,
+    lineHeight: 1,
+    fontWeight: 300,
+    opacity: 0.78,
   },
   actionsGrid: {
     display: "grid",
