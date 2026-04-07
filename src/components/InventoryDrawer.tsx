@@ -386,7 +386,7 @@ export default function InventoryDrawer({
   onBulkChangeQtyOnHand,
 }: Props) {
   const [search, setSearch] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState<"active" | "all">("active");
+  const [statusFilter, setStatusFilter] = React.useState<string>("all");
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = React.useState(false);
   const [bulkOnHandOpen, setBulkOnHandOpen] = React.useState(false);
@@ -714,7 +714,7 @@ export default function InventoryDrawer({
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
       const status = String(row.status ?? "").trim().toLowerCase();
-      if (statusFilter === "active" && status !== "active") return false;
+      if (statusFilter !== "all" && status !== statusFilter) return false;
       if (!q) return true;
       return [
         row.name,
@@ -848,6 +848,29 @@ export default function InventoryDrawer({
     [runBulkUnlimited]
   );
 
+  const statusOptions = React.useMemo(() => {
+    const seen = new Set<string>();
+    const options: Array<{ value: string; label: string }> = [{ value: "all", label: "ALL" }];
+    for (const row of rows) {
+      const value = String(row.status ?? "").trim().toLowerCase();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      options.push({
+        value,
+        label: value
+          .split(/[\s_-]+/)
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" "),
+      });
+    }
+    return options.sort((a, b) => {
+      if (a.value === "all") return -1;
+      if (b.value === "all") return 1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [rows]);
+
   const panelTop = Math.max(topOffset, 0);
   const panelHeight = `calc(100vh - ${panelTop}px)`;
 
@@ -949,13 +972,16 @@ export default function InventoryDrawer({
                   ) : null}
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as "active" | "all")}
+                    onChange={(e) => setStatusFilter(e.target.value)}
                     style={styles.statusFilterSelect}
                     aria-label="Filter by product status"
                     title="Filter by status"
                   >
-                    <option value="active">Active</option>
-                    <option value="all">All</option>
+                    {statusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                   <button type="button" style={styles.stockUpBtn} onClick={() => setStockUpOpen(true)}>
                     STOCK UP

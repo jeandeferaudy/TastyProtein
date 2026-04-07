@@ -81,6 +81,20 @@ type InventoryStockRow = {
   sellingPrice: number;
 };
 
+function normalizeInventorySnapshot(row: Record<string, unknown>) {
+  const qtyOnHand = Math.max(0, Number(row.qty_on_hand ?? 0));
+  const qtyAllocated = Math.max(0, Number(row.qty_allocated ?? 0));
+  const rawAvailable = row.qty_available == null ? Number.NaN : Number(row.qty_available);
+  const qtyAvailable = Number.isFinite(rawAvailable)
+    ? Math.max(0, rawAvailable)
+    : Math.max(qtyOnHand - qtyAllocated, 0);
+  return {
+    qty_on_hand: qtyOnHand,
+    qty_allocated: qtyAllocated,
+    qty_available: qtyAvailable,
+  };
+}
+
 type ProductSummary = {
   id: string;
   label: string;
@@ -1025,21 +1039,27 @@ export default function AnalyticsDrawer({
       try {
         const { data, error } = await supabase
           .from("inventory")
-          .select("product_id,qty_on_hand,products(id,name,long_name,product_cost,selling_price)")
+          .select("product_id,qty_on_hand,qty_allocated,qty_available,products(id,name,long_name,product_cost,selling_price)")
           .limit(5000);
         if (error) throw error;
         if (cancelled) return;
-        const rows: InventoryStockRow[] = (data ?? []).map((row: any) => {
+        const byProductId = new Map<string, InventoryStockRow>();
+        for (const row of (data ?? []) as any[]) {
           const product = Array.isArray(row.products) ? row.products[0] ?? {} : row.products ?? {};
-          return {
-            productId: String(row.product_id ?? product.id ?? ""),
+          const productId = String(row.product_id ?? product.id ?? "");
+          if (!productId) continue;
+          const normalized = normalizeInventorySnapshot(row as Record<string, unknown>);
+          const existing = byProductId.get(productId);
+          const nextQtyOnHand = (existing?.qtyOnHand ?? 0) + normalized.qty_on_hand;
+          byProductId.set(productId, {
+            productId,
             productName: String(product.long_name ?? product.name ?? "Item"),
-            qtyOnHand: Math.max(0, Number(row.qty_on_hand ?? 0)),
+            qtyOnHand: nextQtyOnHand,
             productCost: Math.max(0, Number(product.product_cost ?? 0)),
             sellingPrice: Math.max(0, Number(product.selling_price ?? 0)),
-          };
-        });
-        setInventoryStockRows(rows);
+          });
+        }
+        setInventoryStockRows(Array.from(byProductId.values()));
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to load inventory stock valuation", error);
@@ -1577,8 +1597,6 @@ export default function AnalyticsDrawer({
         { label: "Stock value (cost)", value: formatMoney(stockCostValue) },
         { label: "Stock value (sales)", value: formatMoney(stockSalesValue) },
         { label: "Sitting profit", value: formatMoney(stockSittingProfit) },
-        { label: "Inbound value in view", value: formatMoney(totalSeriesSum) },
-        { label: "Latest inbound value", value: formatMoney(latestInboundValue) },
       ];
     }
     return [];
