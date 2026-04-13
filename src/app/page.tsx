@@ -4744,7 +4744,12 @@ React.useEffect(() => {
     let resolvedReferralDiscountAmount = 0;
     let resolvedReferralRewardCredits = 0;
 
-    if (!user?.id && createAccountFromDetails) {
+    const isOnBehalfCheckout = Boolean(customer.placed_for_someone_else);
+    if (isOnBehalfCheckout && createAccountFromDetails) {
+      setCreateAccountFromDetails(false);
+    }
+
+    if (!user?.id && createAccountFromDetails && !isOnBehalfCheckout) {
       try {
         user = await ensureCheckoutAccountFromDetails();
       } catch (e) {
@@ -4863,7 +4868,7 @@ React.useEffect(() => {
     }
 
     const customerData = customer as Record<string, unknown>;
-    const customerEmail = String(customerData["email"] ?? "");
+    const customerEmail = isOnBehalfCheckout ? "" : String(customerData["email"] ?? "");
     const customerDeliveryDate = String(customerData["delivery_date"] ?? "");
     const customerDeliverySlot = String(customerData["delivery_slot"] ?? "");
     const customerExpress = Boolean(customerData["express_delivery"]);
@@ -5188,11 +5193,12 @@ React.useEffect(() => {
       )
     );
     await refreshCart();
-    if (user?.id && (saveAddressToProfile || createAccountFromDetails)) {
+    if (user?.id && (saveAddressToProfile || createAccountFromDetails || isOnBehalfCheckout)) {
       try {
+        const customerSyncEmail = isOnBehalfCheckout ? null : (customerEmail.trim() || user.email || null);
         await syncProfileAndCustomer({
           profileId: user.id,
-          email: customerEmail.trim() || user.email || null,
+          email: customerSyncEmail,
           customerId: resolvedCustomerId,
           customerDraft: customer,
         });

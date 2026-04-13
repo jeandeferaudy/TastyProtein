@@ -616,6 +616,13 @@ export default function CheckoutDrawer({
     }
   }, [canUseReferralCode, clearReferralState]);
 
+  React.useEffect(() => {
+    if (!customer.placed_for_someone_else) return;
+    if (createAccountFromDetails && setCreateAccountFromDetails) {
+      setCreateAccountFromDetails(false);
+    }
+  }, [createAccountFromDetails, customer.placed_for_someone_else, setCreateAccountFromDetails]);
+
   const applyReferralCode = React.useCallback(async () => {
     const code = referralCodeDraft.trim().toUpperCase();
     if (!canUseReferralCode) {
@@ -2112,13 +2119,14 @@ export default function CheckoutDrawer({
                 </div>
                 </div>
 
-	                {!isLoggedIn && steakCreditsEnabled && setCreateAccountFromDetails ? (
+                {!isLoggedIn && steakCreditsEnabled && setCreateAccountFromDetails ? (
                   <div style={styles.steakCreditsBox}>
                     <label style={styles.steakCreditsBoxRow}>
                       <input
                         type="checkbox"
                         style={styles.steakCreditsBoxCheckbox}
                         checked={createAccountFromDetails}
+                        disabled={customer.placed_for_someone_else}
                         onChange={(e) => setCreateAccountFromDetails(e.target.checked)}
                       />
                       <span style={styles.steakCreditsBoxTextCol}>
